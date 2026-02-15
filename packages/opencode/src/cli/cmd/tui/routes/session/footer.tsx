@@ -189,6 +189,7 @@ export function Footer() {
   // Auto-recovery tracking
   let recoveryTriggeredRaw = false
   let recoveryCountRaw = 0
+  let lastToolEndTimeRaw: number | undefined // Track when last tool completed
 
   // Last user message for re-issue
   let lastUserMessageRaw: { text: string; parts: any[] } | undefined
@@ -364,7 +365,13 @@ export function Footer() {
     // Calculate recovery countdown
     const timeout = currentTimeout()
     let recoveryCountdown = 0
-    if (busyRaw && !isToolRunning && silenceDuration > 2000) {
+
+    // Grace period after tool completion before auto-recovery (60 seconds)
+    const toolGracePeriod = 60_000
+    const timeSinceToolEnd = lastToolEndTimeRaw ? now - lastToolEndTimeRaw : Infinity
+    const withinToolGracePeriod = timeSinceToolEnd < toolGracePeriod
+
+    if (busyRaw && !isToolRunning && !withinToolGracePeriod && silenceDuration > 2000) {
       recoveryCountdown = Math.max(0, timeout.ms - silenceDuration)
 
       // Trigger recovery if countdown reached zero
@@ -515,6 +522,8 @@ export function Footer() {
         if (lastToolRaw === part.tool) {
           setActivity("waiting")
           transitionFSM("wait")
+          // Track when tool completed for grace period
+          lastToolEndTimeRaw = Date.now()
         }
       }
     }
@@ -551,6 +560,7 @@ export function Footer() {
         lastByteTimeRaw = undefined
         retryCountRaw = 0
         recoveryTriggeredRaw = false
+        lastToolEndTimeRaw = undefined // Reset tool grace period tracking
         // Reset FSM for new turn
         fsmTransitionsRaw = []
         fsmDepthRaw = 0
