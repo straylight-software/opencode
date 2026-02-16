@@ -107,27 +107,30 @@ unwrapSessionId (SessionId s) = s
 truncate :: Int -> String -> String
 truncate n s =
   if String.length s > n
-    then String.take (n - 3) s <> "..."
+    then String.take (n - 3) s
     else s
 
 eventSummary :: Event -> String
 eventSummary = case _ of
-  SessionCreated { session } -> "Session created: " <> session.title
-  SessionUpdated { session } -> "Session updated: " <> session.title
+  ServerConnected -> "Server connected"
+  SessionCreated { info } -> "Session created: " <> info.title
+  SessionUpdated { info } -> "Session updated: " <> info.title
   SessionDeleted { sessionID } -> "Session deleted: " <> unwrapSessionId sessionID
   SessionStatus { sessionID, status } -> "Session " <> unwrapSessionId sessionID <> " status: " <> status
   SessionIdle { sessionID } -> "Session idle: " <> unwrapSessionId sessionID
-  SessionError { sessionID, error } -> "Session error: " <> error
-  MessageUpdated { sessionID } -> "Message updated in " <> unwrapSessionId sessionID
-  MessageRemoved { sessionID, messageID } -> "Message removed"
-  MessagePartUpdated {} -> "Message part updated"
-  PermissionAsked { tool } -> "Permission requested for: " <> tool
-  PermissionReplied { allowed } -> "Permission " <> if allowed then "granted" else "denied"
-  QuestionAsked { question } -> "Question: " <> truncate 40 question
-  QuestionReplied { answer } -> "Answer received"
-  TodoUpdated { todos } -> "Todos updated (" <> show (Array.length todos) <> " items)"
-  ServerConnected -> "Server connected"
-  UnknownEvent { type_ } -> "Unknown event: " <> type_
+  SessionError { sessionID } -> "Session error: " <> unwrapSessionId sessionID
+  MessageUpdated { info } -> "Message updated: " <> show info.id
+  MessageRemoved { messageID } -> "Message removed: " <> show messageID
+  MessagePartUpdated { messageID, partIndex } -> "Part " <> show partIndex <> " updated in " <> show messageID
+  MessagePartRemoved { messageID, partIndex } -> "Part " <> show partIndex <> " removed from " <> show messageID
+  PermissionAsked { sessionID, permissions } -> "Permission requested in " <> unwrapSessionId sessionID <> " (" <> show (Array.length permissions) <> " tools)"
+  PermissionReplied { sessionID } -> "Permission replied in " <> unwrapSessionId sessionID
+  QuestionAsked { sessionID, question } -> "Question in " <> unwrapSessionId sessionID <> ": " <> truncate 40 question.question
+  QuestionReplied { sessionID } -> "Question replied in " <> unwrapSessionId sessionID
+  QuestionRejected { sessionID } -> "Question rejected in " <> unwrapSessionId sessionID
+  TodoUpdated { sessionID, todos } -> "Todos updated in " <> unwrapSessionId sessionID <> " (" <> show (Array.length todos) <> " items)"
+  ProjectUpdated { projectID } -> "Project updated: " <> projectID
+  UnknownEvent { eventType } -> "Unknown event: " <> eventType
 
 comparing :: forall a b. Ord b => (a -> b) -> a -> a -> Ordering
 comparing f x y = compare (f x) (f y)
