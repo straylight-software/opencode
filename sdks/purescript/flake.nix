@@ -61,6 +61,7 @@
             nativeBuildInputs = pursTools ++ [
               pkgsWithPS.esbuild
               pkgsWithPS.nodejs
+              pkgsWithPS.git
             ];
 
             buildPhase = ''
@@ -102,7 +103,7 @@
               version = "0.1.0";
               src = ./.;
 
-              nativeBuildInputs = pursTools;
+              nativeBuildInputs = pursTools ++ [ pkgsWithPS.git ];
 
               buildPhase = ''
                 export HOME=$TMPDIR
