@@ -104,7 +104,7 @@ abortSession cfg (SessionId sid) =
 --------------------------------------------------------------------------------
 
 -- | Check server health
-healthCheck :: Config -> Aff (Either ApiError { ok :: Boolean })
+healthCheck :: Config -> Aff (Either ApiError { healthy :: Boolean, version :: String })
 healthCheck cfg = request cfg GET "/global/health" Nothing
 
 -- | Get server configuration

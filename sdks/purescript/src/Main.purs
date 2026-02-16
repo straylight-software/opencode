@@ -10,6 +10,7 @@ import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Data.String as String
 import Effect (Effect)
+import Control.Monad.Rec.Class (forever)
 import Effect.Aff (Aff, launchAff_, delay, Milliseconds(..))
 import Effect.Class (liftEffect)
 import Effect.Class.Console as Console
@@ -41,10 +42,10 @@ main = launchAff_ do
       Console.log $ "  " <> show err
       Console.log ""
       Console.log "  Make sure the Weapon server is running:"
-      Console.log "    weapon --port 4096"
+      Console.log "    nix run .#serve"
       Console.log ""
-    Right _ -> do
-      Console.log "  Connected to Weapon server"
+    Right health -> do
+      Console.log $ "  Connected to Weapon server v" <> health.version
       Console.log ""
       runDemo defaultConfig
 
@@ -127,9 +128,6 @@ eventSummary = case _ of
   TodoUpdated { todos } -> "Todos updated (" <> show (Array.length todos) <> " items)"
   ServerConnected -> "Server connected"
   UnknownEvent { type_ } -> "Unknown event: " <> type_
-
-forever :: Aff Unit -> Aff Unit
-forever action = action *> forever action
 
 comparing :: forall a b. Ord b => (a -> b) -> a -> a -> Ordering
 comparing f x y = compare (f x) (f y)

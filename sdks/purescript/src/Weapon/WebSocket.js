@@ -1,77 +1,104 @@
 // FFI for EventSource (Server-Sent Events)
-// Works in both browser and Node.js (with eventsource polyfill)
+// Works in both browser and Node.js
+
+// Use dynamic import for Node.js built-in modules (ESM compatible)
+let httpModule = null
+let httpsModule = null
+
+const getHttp = async () => {
+  if (!httpModule) {
+    httpModule = await import("node:http")
+  }
+  return httpModule.default || httpModule
+}
+
+const getHttps = async () => {
+  if (!httpsModule) {
+    httpsModule = await import("node:https")
+  }
+  return httpsModule.default || httpsModule
+}
 
 export const createEventSource = (url) => () => {
-  // In Node.js, we need the eventsource package
   // In browser, EventSource is global
-  if (typeof EventSource === "undefined") {
-    // Node.js - try to use the eventsource package or a simple HTTP approach
-    const http = require("http")
-    const https = require("https")
-    const { URL } = require("url")
+  if (typeof EventSource !== "undefined") {
+    return new EventSource(url)
+  }
 
-    const parsedUrl = new URL(url)
-    const client = parsedUrl.protocol === "https:" ? https : http
+  // Node.js - use built-in http/https modules
+  const parsedUrl = new URL(url)
 
-    const fakeEventSource = {
-      _listeners: { message: [], error: [], open: [] },
-      _request: null,
-      close: function () {
-        if (this._request) {
-          this._request.destroy()
-        }
-      },
-    }
-
-    const req = client.get(url, (res) => {
-      // Fire open event
-      for (const fn of fakeEventSource._listeners.open) {
-        fn()
+  const fakeEventSource = {
+    _listeners: { message: [], error: [], open: [] },
+    _request: null,
+    readyState: 0, // CONNECTING
+    close: function () {
+      this.readyState = 2 // CLOSED
+      if (this._request) {
+        this._request.destroy()
       }
+    },
+  }
 
-      let buffer = ""
+  // Start connection asynchronously
+  ;(async () => {
+    try {
+      const client = parsedUrl.protocol === "https:" ? await getHttps() : await getHttp()
 
-      res.on("data", (chunk) => {
-        buffer += chunk.toString()
+      const req = client.get(url, (res) => {
+        fakeEventSource.readyState = 1 // OPEN
 
-        // Parse SSE format: "data: {...}\n\n"
-        const lines = buffer.split("\n\n")
-        buffer = lines.pop() || "" // Keep incomplete message in buffer
+        // Fire open event
+        for (const fn of fakeEventSource._listeners.open) {
+          fn()
+        }
 
-        for (const block of lines) {
-          const dataLine = block.split("\n").find((line) => line.startsWith("data:"))
-          if (dataLine) {
-            const data = dataLine.slice(5).trim() // Remove "data:" prefix
-            for (const fn of fakeEventSource._listeners.message) {
-              fn({ data })
+        let buffer = ""
+
+        res.on("data", (chunk) => {
+          buffer += chunk.toString()
+
+          // Parse SSE format: "data: {...}\n\n"
+          const lines = buffer.split("\n\n")
+          buffer = lines.pop() || "" // Keep incomplete message in buffer
+
+          for (const block of lines) {
+            const dataLine = block.split("\n").find((line) => line.startsWith("data:"))
+            if (dataLine) {
+              const data = dataLine.slice(5).trim() // Remove "data:" prefix
+              for (const fn of fakeEventSource._listeners.message) {
+                fn({ data })
+              }
             }
           }
-        }
+        })
+
+        res.on("error", (err) => {
+          for (const fn of fakeEventSource._listeners.error) {
+            fn(err)
+          }
+        })
+
+        res.on("end", () => {
+          fakeEventSource.readyState = 2 // CLOSED
+        })
       })
 
-      res.on("error", (err) => {
+      req.on("error", (err) => {
         for (const fn of fakeEventSource._listeners.error) {
           fn(err)
         }
       })
 
-      res.on("end", () => {
-        // Connection closed
-      })
-    })
-
-    req.on("error", (err) => {
+      fakeEventSource._request = req
+    } catch (err) {
       for (const fn of fakeEventSource._listeners.error) {
         fn(err)
       }
-    })
+    }
+  })()
 
-    fakeEventSource._request = req
-    return fakeEventSource
-  } else {
-    // Browser - use native EventSource
-    return new EventSource(url)
-  }
+  return fakeEventSource
 }
 
 export const closeEventSource = (es) => () => {
