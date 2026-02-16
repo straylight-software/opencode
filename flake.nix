@@ -82,6 +82,9 @@
         pkgs:
         let
           weapon = self.packages.${pkgs.system}.weapon;
+          pursScript = pkgs.writeShellScript "purescript-cli" ''
+            exec ${./sdks/purescript/result}/bin/weapon-ps "$@"
+          '';
         in
         {
           default = {
@@ -97,6 +100,14 @@
             program = toString (
               pkgs.writeShellScript "weapon-serve" ''
                 exec ${weapon}/bin/weapon serve --port 4096 "$@"
+              ''
+            );
+          };
+          purescript-cli = {
+            type = "app";
+            program = toString (
+              pkgs.writeShellScript "purescript-cli" ''
+                exec nix run ./sdks/purescript -- "$@"
               ''
             );
           };
