@@ -22,13 +22,14 @@ module Weapon.Client
 
 import Prelude
 
-import Affjax (Error, printError)
-import Affjax as Affjax
+import Affjax.Node as Affjax
+import Affjax (defaultRequest, printError)
 import Affjax.RequestBody as RequestBody
 import Affjax.RequestHeader (RequestHeader(..))
 import Affjax.ResponseFormat as ResponseFormat
 import Affjax.StatusCode (StatusCode(..))
-import Data.Argonaut (class DecodeJson, class EncodeJson, decodeJson, encodeJson, printJsonDecodeError)
+import Data.MediaType (MediaType(..))
+import Data.Argonaut (class DecodeJson, decodeJson, encodeJson, printJsonDecodeError)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
 import Data.HTTP.Method (Method(..))
@@ -67,7 +68,7 @@ getSession cfg (SessionId sid) = request cfg GET ("/session/" <> sid) Nothing
 -- | Create a new session in the given directory
 createSession :: Config -> String -> Aff (Either ApiError Session)
 createSession cfg directory = 
-  request cfg POST "/session" (Just $ encodeJson { directory })
+  request cfg POST "/session" (Just $ RequestBody.json $ encodeJson { directory })
 
 -- | Delete a session
 deleteSession :: Config -> SessionId -> Aff (Either ApiError Unit)
@@ -91,7 +92,7 @@ getMessage cfg (SessionId sid) (MessageId mid) =
 -- | Send a prompt to a session (async - returns immediately)
 sendPrompt :: Config -> SessionId -> PromptInput -> Aff (Either ApiError Unit)
 sendPrompt cfg (SessionId sid) prompt =
-  request cfg POST ("/session/" <> sid <> "/prompt_async") (Just $ encodeJson prompt)
+  request cfg POST ("/session/" <> sid <> "/prompt_async") (Just $ RequestBody.json $ encodeJson prompt)
 
 -- | Abort the current operation in a session
 abortSession :: Config -> SessionId -> Aff (Either ApiError Unit)
@@ -121,15 +122,15 @@ request
   => Config
   -> Method
   -> String
-  -> Maybe Affjax.RequestBody.RequestBody
+   -> Maybe RequestBody.RequestBody
   -> Aff (Either ApiError a)
 request cfg method path body = do
-  result <- Affjax.request Affjax.defaultRequest
+  result <- Affjax.request defaultRequest
     { method = Left method
     , url = configUrl cfg <> path
     , responseFormat = ResponseFormat.json
     , content = body
-    , headers = [ ContentType (Affjax.RequestHeader.MediaType "application/json") ]
+    , headers = [ ContentType (MediaType "application/json") ]
     }
   pure $ case result of
     Left err -> Left (NetworkError $ printError err)

@@ -21,11 +21,10 @@ import Data.Argonaut (decodeJson, jsonParser, printJsonDecodeError)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
-import Effect.Aff (Aff, makeAff, nonCanceler)
+import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Effect.Console as Console
-import Effect.Ref (Ref)
-import Effect.Ref as Ref
+
 import Weapon.Types (Config, Event, configUrl)
 
 --------------------------------------------------------------------------------

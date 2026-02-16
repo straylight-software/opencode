@@ -6,14 +6,14 @@ module Weapon.Types where
 
 import Prelude
 
-import Data.Argonaut (class DecodeJson, class EncodeJson, Json, JsonDecodeError, decodeJson, encodeJson, jsonParser, printJsonDecodeError)
+import Data.Argonaut (class DecodeJson, class EncodeJson, Json, decodeJson, encodeJson, jsonParser, printJsonDecodeError)
 import Data.Argonaut.Decode.Generic (genericDecodeJson)
 import Data.Argonaut.Encode.Generic (genericEncodeJson)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe)
 import Data.Newtype (class Newtype)
-import Foreign.Object (Object)
+
 
 --------------------------------------------------------------------------------
 -- Client Config
@@ -176,19 +176,6 @@ type Todo =
   , status :: String
   , priority :: String
   }
-
---------------------------------------------------------------------------------
--- API Response Types
---------------------------------------------------------------------------------
-
--- | Standard API error
-type ApiError =
-  { code :: String
-  , message :: String
-  }
-
--- | Result of an API call
-type ApiResult a = Either ApiError a
 
 --------------------------------------------------------------------------------
 -- Prompt Types
