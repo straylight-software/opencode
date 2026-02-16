@@ -77,5 +77,30 @@
           };
         }
       );
+
+      apps = forEachSystem (
+        pkgs:
+        let
+          weapon = self.packages.${pkgs.system}.weapon;
+        in
+        {
+          default = {
+            type = "app";
+            program = "${weapon}/bin/weapon";
+          };
+          weapon = {
+            type = "app";
+            program = "${weapon}/bin/weapon";
+          };
+          serve = {
+            type = "app";
+            program = toString (
+              pkgs.writeShellScript "weapon-serve" ''
+                exec ${weapon}/bin/weapon serve --port 4096 "$@"
+              ''
+            );
+          };
+        }
+      );
     };
 }
