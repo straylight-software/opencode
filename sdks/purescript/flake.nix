@@ -185,6 +185,9 @@
 
               cd "$BUILD_DIR"
 
+              # Create output directory for spago cache
+              mkdir -p output
+
               echo "Installing npm dependencies..."
               npm install --silent
 
@@ -201,7 +204,7 @@
             fi
 
             # Set up NODE_PATH for xhr2
-            export NODE_PATH="$BUILD_DIR/node_modules:$NODE_PATH"
+            export NODE_PATH="$BUILD_DIR/node_modules''${NODE_PATH:+:$NODE_PATH}"
 
             # Run
             exec spago run -- "$@"
