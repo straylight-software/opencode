@@ -1,0 +1,35 @@
+package:
+  name: weapon
+  dependencies:
+    - prelude
+    - effect
+    - aff
+    - console
+    - node-process
+    - node-buffer
+    - node-streams
+    - node-event-emitter
+    - argonaut
+    - argonaut-codecs
+    - argonaut-generic
+    - affjax
+    - affjax-node
+    - either
+    - maybe
+    - transformers
+    - foreign-object
+    - newtype
+    - strings
+    - arrays
+    - foldable-traversable
+    - tuples
+    - refs
+    - optparse
+    - web-socket
+    - aff-promise
+    - js-uri
+
+workspace:
+  packageSet:
+    registry: 59.5.0
+  extraPackages: {}

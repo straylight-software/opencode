@@ -1,0 +1,20 @@
+# Spago
+.spago/
+output/
+
+# Node
+node_modules/
+
+# Build artifacts
+dist/
+
+# Editor
+.purs-repl
+.psc-ide-port
+
+# Nix
+result
+result-*
+
+# Generated types (optional - you may want to commit these)
+# src/Weapon/Generated/
