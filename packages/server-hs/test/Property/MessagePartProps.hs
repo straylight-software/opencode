@@ -2,6 +2,7 @@
 
 module Property.MessagePartProps where
 
+import Control.Monad (when)
 import Data.Aeson (Value (..), object, (.=))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
@@ -51,6 +52,7 @@ prop_updateMissingPart :: Property
 prop_updateMissingPart = property $ do
     pid <- forAll genNonEmptyText
     otherPid <- forAll genNonEmptyText
+    when (pid == otherPid) discard
     part <- forAll (genPart otherPid)
     patch <- forAll genPatch
     Parts.updatePart pid patch [part] === Nothing
@@ -59,6 +61,7 @@ prop_deleteMissingPart :: Property
 prop_deleteMissingPart = property $ do
     pid <- forAll genNonEmptyText
     otherPid <- forAll genNonEmptyText
+    when (pid == otherPid) discard
     part <- forAll (genPart otherPid)
     Parts.deletePart pid [part] === Nothing
 
