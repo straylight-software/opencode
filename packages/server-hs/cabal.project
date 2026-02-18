@@ -1,0 +1,5 @@
+packages: .
+
+-- Use local haskemathesis with pathInfo fix
+-- TODO: Update to git repo after fix is pushed
+packages: /home/luke/Projects/haskemathesis

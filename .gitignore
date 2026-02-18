@@ -22,7 +22,7 @@ target
 .scripts
 
 # Local dev files
-opencode-dev
+weapon-dev
 logs/
 *.bun-build
 .nixd.json

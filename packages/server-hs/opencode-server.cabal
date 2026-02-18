@@ -1,0 +1,213 @@
+cabal-version: 3.0
+name:          opencode-server
+version:       0.1.0.0
+synopsis:      OpenCode Haskell Server
+license:       MIT
+build-type:    Simple
+
+library
+  exposed-modules:
+    Agent.Agent
+    Agent.Types
+    Api
+    Bus.Bus
+    Bus.Event
+    Config.Config
+    Config.Types
+    Experimental.Worktree
+    Find.Parse
+    Find.Search
+    Formatter.Status
+    Global.Event
+    Handlers
+    Health.Build
+    LLM.Anthropic
+    LLM.OpenRouter
+    LLM.Types
+    Log
+    Lsp.Store
+    Message.Parts
+    Message.Todo
+    Message.Types
+    Path.Build
+    Project.Build
+    Project.Discovery
+    Prompt.Async
+    Provider.OAuth
+    Provider.Provider
+    Provider.Types
+    Proxy.Proxy
+    Proxy.Types
+    Pty.Connect
+    Pty.Parse
+    Pty.Pty
+    Pty.Types
+    Request.Store
+    Sandbox.Sandbox
+    Sandbox.Types
+    Session.Session
+    Session.Status
+    Session.Types
+    Skill.Skill
+    State
+    Storage.Storage
+    Tool.Defs
+    Tool.Exec
+    Tool.Tool
+    Tool.Types
+    Tui.Store
+    Vcs.Diff
+    Vcs.Status
+
+  hs-source-dirs:     src
+  default-language:   GHC2021
+  ghc-options:        -Wall -O2 -Werror
+  build-depends:
+    , aeson               >=2.0
+    , base                >=4.17 && <5
+    , base64-bytestring   >=1.2
+    , bytestring          >=0.11
+    , case-insensitive    >=1.2
+    , containers          >=0.6
+    , crypton-connection  >=0.4
+    , data-default-class  >=0.1
+    , directory           >=1.3
+    , filepath            >=1.4
+    , http-client
+    , http-client-tls
+    , http-types          >=0.12
+    , katip               >=0.8
+    , mtl                 >=2.2
+    , network             >=3.1
+    , posix-pty           >=0.2
+    , process             >=1.6
+    , random              >=1.2
+    , servant             >=0.20
+    , servant-server      >=0.20
+    , stm                 >=2.5
+    , text                >=2.0
+    , time                >=1.12
+    , tls                 >=2.0
+    , unix                >=2.8
+    , unliftio-core       >=0.2
+    , wai                 >=3.2
+    , wai-websockets      >=3.0
+    , warp                >=3.3
+    , websockets          >=0.12
+
+  default-extensions:
+    DataKinds
+    DeriveGeneric
+    LambdaCase
+    OverloadedStrings
+    TypeOperators
+
+executable opencode-server
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  default-language: GHC2021
+  ghc-options:      -Wall -O2 -threaded -rtsopts -with-rtsopts=-N -Werror
+  build-depends:
+    , aeson
+    , base             >=4.17 && <5
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , http-types
+    , katip
+    , opencode-server
+    , process
+    , servant-server
+    , stm
+    , text
+    , time
+    , wai
+    , wai-websockets
+    , warp
+    , websockets
+
+test-suite opencode-server-test
+  type:               exitcode-stdio-1.0
+  main-is:            Spec.hs
+  other-modules:
+    ApiCompatibilitySpec
+    Integration.ApiComplianceTest
+    Integration.HaskemathesisTest
+    Property.BusProps
+    Property.ConfigProps
+    Property.DiffProps
+    Property.EventProps
+    Property.ExperimentalProps
+    Property.FindParseProps
+    Property.FormatterProps
+    Property.HandlerProps
+    Property.HealthProps
+    Property.LLMProps
+    Property.LspProps
+    Property.MessagePartProps
+    Property.MessageProps
+    Property.OAuthProps
+    Property.OpenApiProps
+    Property.PathProps
+    Property.ProjectDiscoveryProps
+    Property.ProjectProps
+    Property.PromptAsyncProps
+    Property.ProviderProps
+    Property.PtyProps
+    Property.RequestProps
+    Property.SessionProps
+    Property.SessionStatusProps
+    Property.SkillProps
+    Property.StorageProps
+    Property.TodoProps
+    Property.ToolProps
+    Property.TuiProps
+    Property.VcsStatusProps
+    Unit.ApiSpec
+
+  hs-source-dirs:     test
+  default-language:   GHC2021
+  ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-N -Werror
+  build-depends:
+    , aeson                 >=2.0
+    , base                  >=4.17 && <5
+    , base64-bytestring     >=1.2
+    , bytestring            >=0.11
+    , containers            >=0.6
+    , directory             >=1.3
+    , filepath              >=1.4
+    , haskemathesis
+    , hedgehog              >=1.4
+    , hspec                 >=2.11
+    , hspec-core            >=2.11
+    , hspec-hedgehog        >=0.1
+    , http-client
+    , http-client-tls
+    , http-types
+    , katip                 >=0.8
+    , openapi3              >=3.2
+    , opencode-server
+    , process
+    , regex-pcre            >=0.95
+    , servant               >=0.20
+    , servant-server        >=0.20
+    , stm                   >=2.5
+    , tasty                 >=1.5
+    , tasty-hedgehog        >=1.4
+    , tasty-hspec           >=1.2
+    , temporary             >=1.3
+    , text                  >=2.0
+    , transformers          >=0.6
+    , unix                  >=2.8
+    , unordered-containers  >=0.2
+    , wai                   >=3.2
+    , wai-extra             >=3.1
+
+  default-extensions:
+    DataKinds
+    DeriveGeneric
+    LambdaCase
+    OverloadedStrings
+    RecordWildCards
+    TypeOperators

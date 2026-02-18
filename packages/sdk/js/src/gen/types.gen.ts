@@ -805,6 +805,15 @@ export type EventSessionError = {
   }
 }
 
+export type EventSessionBackgroundError = {
+  type: "session.background.error"
+  properties: {
+    sessionID: string
+    agent: string
+    message: string
+  }
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -950,6 +959,7 @@ export type Event =
   | EventSessionDeleted
   | EventSessionDiff
   | EventSessionError
+  | EventSessionBackgroundError
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
@@ -1160,7 +1170,7 @@ export type KeybindsConfig = {
    */
   agent_cycle_reverse?: string
   /**
-   * Cycle FREE mode stall timeout
+   * Cycle mode (LOCKED / ARMED)
    */
   stall_timeout_cycle?: string
   /**
@@ -1359,7 +1369,7 @@ export type KeybindsConfig = {
 export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR"
 
 /**
- * Server configuration for opencode serve and web commands
+ * Server configuration for weapon serve and web commands
  */
 export type ServerConfig = {
   /**
@@ -1375,7 +1385,7 @@ export type ServerConfig = {
    */
   mdns?: boolean
   /**
-   * Custom domain name for mDNS service (default: opencode.local)
+   * Custom domain name for mDNS service (default: weapon.local)
    */
   mdnsDomain?: string
   /**
@@ -1617,7 +1627,7 @@ export type Config = {
   }
   server?: ServerConfig
   /**
-   * Command configuration, see https://opencode.ai/docs/commands
+   * Command configuration, see https://weapon.ai/docs/commands
    */
   command?: {
     [key: string]: {
@@ -1691,7 +1701,7 @@ export type Config = {
     [key: string]: AgentConfig | undefined
   }
   /**
-   * Agent configuration, see https://opencode.ai/docs/agents
+   * Agent configuration, see https://weapon.ai/docs/agents
    */
   agent?: {
     plan?: AgentConfig
