@@ -64,7 +64,7 @@ formattersFor cfg = case CT.cfgFormatter cfg of
     Nothing -> baseFormatters
   where
     baseMap = Map.fromList (map (\info -> (fiName info, info)) baseFormatters)
-    applyEntries entries base = foldl applyEntry base (Map.toList entries)
+    applyEntries entries base = foldl' applyEntry base (Map.toList entries)
     applyEntry acc (name, entry)
         | CT.feDisabled entry == Just True = Map.delete name acc
         | otherwise = case Map.lookup name acc of

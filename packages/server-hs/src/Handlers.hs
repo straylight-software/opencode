@@ -5,6 +5,11 @@
 
 module Handlers where
 
+import Agent.Agent qualified as Agent
+import Agent.Types qualified as AT
+import Api
+import Bus.Bus qualified as Bus
+import Config.Config qualified as Config
 import Control.Concurrent (forkIO)
 import Control.Concurrent.STM
 import Control.Exception (SomeException, catch)
@@ -16,6 +21,7 @@ import Data.Aeson.Key qualified as K
 import Data.Aeson.KeyMap qualified as KM
 import Data.ByteString qualified as BS
 import Data.ByteString.Base64 qualified as B64
+import Data.ByteString.Lazy qualified as BSL
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text, pack, unpack)
@@ -23,18 +29,10 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import Servant
-import System.Directory (doesDirectoryExist, doesFileExist, getCurrentDirectory, getHomeDirectory, listDirectory, makeAbsolute)
-import System.FilePath ((</>))
-
-import Agent.Agent qualified as Agent
-import Agent.Types qualified as AT
-import Api
-import Bus.Bus qualified as Bus
-import Config.Config qualified as Config
 import Experimental.Worktree qualified as Worktree
 import Find.Search qualified as FindSearch
 import Formatter.Status qualified as Formatter
+import Global.Event qualified as Event
 import Health.Build qualified as HealthBuild
 import Katip qualified
 import LLM.Anthropic qualified as Anthropic
@@ -56,13 +54,16 @@ import Pty.Parse qualified as PtyParse
 import Pty.Pty qualified as Pty
 import Pty.Types qualified as PtyT
 import Request.Store qualified as RequestStore
+import Servant
 import Session.Session qualified as Sess
 import Session.Status qualified as SessStatus
 import Session.Types qualified as ST
 import Skill.Skill qualified as Skill
 import State
 import Storage.Storage qualified as Storage
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, getHomeDirectory, listDirectory, makeAbsolute)
 import System.Environment (lookupEnv)
+import System.FilePath (takeDirectory, (</>))
 import Tool.Defs qualified as Tool
 import Tool.Exec qualified as ToolExec
 import Tool.Types qualified as ToolT
@@ -187,6 +188,22 @@ globalConfigHandler = liftIO $ do
     cfg <- Config.loadFile path
     return $ Data.Aeson.toJSON $ fromMaybe Config.defaultConfig cfg
 
+-- | Update global configuration (PATCH /global/config)
+globalConfigUpdateHandler :: Value -> Handler Value
+globalConfigUpdateHandler input = liftIO $ do
+    path <- Config.globalConfigPath
+    -- Merge with existing config
+    existing <- Config.loadFile path
+    let merged = mergeConfigValue (maybe (Object KM.empty) Data.Aeson.toJSON existing) input
+    -- Ensure parent directory exists
+    createDirectoryIfMissing True (takeDirectory path)
+    -- Write the merged config
+    BSL.writeFile path (Data.Aeson.encode merged)
+    return merged
+  where
+    mergeConfigValue (Object base) (Object updates) = Object (KM.union updates base)
+    mergeConfigValue _ updates = updates
+
 -- * Project Handlers
 
 projectListHandler :: AppState -> Handler [Project]
@@ -201,6 +218,16 @@ projectCurrentHandler st mDir = liftIO $ do
 
 projectGetHandler :: AppState -> Text -> Handler Project
 projectGetHandler st pid = do
+    let current = ProjectBuild.projectFromDir (unpack (stDirectory st))
+    if Api.id current == pid
+        then return current
+        else throwError err404
+
+-- | Update project properties (PATCH /project/{projectID})
+projectUpdateHandler :: AppState -> Text -> Value -> Handler Project
+projectUpdateHandler st pid _input = do
+    -- For now, just return the current project
+    -- TODO: Implement actual project update (name, icon, commands)
     let current = ProjectBuild.projectFromDir (unpack (stDirectory st))
     if Api.id current == pid
         then return current
@@ -312,6 +339,20 @@ configHandler st = liftIO $ do
     cfg <- Config.get (unpack (stDirectory st))
     return $ Data.Aeson.toJSON cfg
 
+-- | Update project configuration (PATCH /config)
+configUpdateHandler :: AppState -> Value -> Handler Value
+configUpdateHandler st input = liftIO $ do
+    let projectPath = Config.projectConfigPath (unpack (stDirectory st))
+    -- Merge with existing config
+    existing <- Config.loadFile projectPath
+    let merged = mergeConfigValue (maybe (Object KM.empty) Data.Aeson.toJSON existing) input
+    -- Write the merged config
+    BSL.writeFile projectPath (Data.Aeson.encode merged)
+    return merged
+  where
+    mergeConfigValue (Object base) (Object updates) = Object (KM.union updates base)
+    mergeConfigValue _ updates = updates
+
 commandHandler :: Handler [Value]
 commandHandler = return Tool.toolDefinitions
 
@@ -327,15 +368,15 @@ agentHandler = liftIO $ do
 sessionStatusHandler :: AppState -> Handler Value
 sessionStatusHandler st = liftIO $ do
     let ctx = sessionContext st
-    sessions <- Sess.list ctx Nothing Nothing
+    sessions <- Sess.list ctx Nothing Nothing Nothing Nothing
     ptys <- Pty.list (stPtyManager st)
     let status = SessStatus.buildStatus (length sessions) (length ptys)
     return $ Data.Aeson.toJSON status
 
-sessionListHandler :: AppState -> Maybe Text -> Maybe Bool -> Maybe Int -> Handler [Session]
-sessionListHandler st _mDir mRoots mLimit = liftIO $ do
+sessionListHandler :: AppState -> Maybe Text -> Maybe Bool -> Maybe Int -> Maybe Int -> Maybe Text -> Handler [Session]
+sessionListHandler st _mDir mRoots mLimit mStart mSearch = liftIO $ do
     let ctx = sessionContext st
-    sessions <- Sess.list ctx mRoots mLimit
+    sessions <- Sess.list ctx mRoots mLimit mStart mSearch
     return $ map toApiSession sessions
 
 sessionCreateHandler :: AppState -> Maybe Text -> CreateSessionInput -> Handler Session
@@ -388,7 +429,7 @@ sessionUpdateHandler st sid input = do
 sessionChildrenHandler :: AppState -> Text -> Handler [Session]
 sessionChildrenHandler st sid = liftIO $ do
     let ctx = sessionContext st
-    sessions <- Sess.list ctx Nothing Nothing
+    sessions <- Sess.list ctx Nothing Nothing Nothing Nothing
     let children = filter (\s -> ST.sessionParentID s == Just sid) sessions
     return $ map toApiSession children
 
@@ -428,36 +469,37 @@ sessionAbortHandler st sid = liftIO $ do
     Bus.publish (stBus st) "session.error" (object ["sessionID" .= sid, "aborted" .= True])
     return $ object ["sessionID" .= sid, "aborted" .= True]
 
-sessionShareCreateHandler :: AppState -> Text -> Handler SessionShare
+sessionShareCreateHandler :: AppState -> Text -> Handler Session
 sessionShareCreateHandler st sid = do
     let ctx = sessionContext st
     msession <- liftIO $ Sess.update ctx sid (setShare sid)
     case msession of
         Nothing -> throwError err404
-        Just session -> case ST.sessionShare session of
-            Nothing -> throwError err500
-            Just share -> return $ toApiShare share
+        Just session -> return $ toApiSession session
   where
     setShare sid' s =
         let url = "https://share.opencode.ai/session/" <> sid'
          in s{ST.sessionShare = Just (ST.SessionShare url)}
 
-sessionShareDeleteHandler :: AppState -> Text -> Handler Bool
-sessionShareDeleteHandler st sid = liftIO $ do
+sessionShareDeleteHandler :: AppState -> Text -> Handler Session
+sessionShareDeleteHandler st sid = do
     let ctx = sessionContext st
-    updated <- Sess.update ctx sid (\s -> s{ST.sessionShare = Nothing})
-    return $ case updated of
-        Nothing -> False
-        Just _ -> True
+    msession <- liftIO $ Sess.update ctx sid (\s -> s{ST.sessionShare = Nothing})
+    case msession of
+        Nothing -> throwError err404
+        Just session -> return $ toApiSession session
 
-sessionDiffHandler :: AppState -> Text -> Handler Value
-sessionDiffHandler st sid = liftIO $ do
+sessionDiffHandler :: AppState -> Text -> Maybe Text -> Handler Value
+sessionDiffHandler st sid mMessageID = liftIO $ do
+    -- Load diff - when messageID is provided, we could load message-specific diff
+    -- For now, we return the current working directory diff
     mresult <- Diff.loadDiff (unpack (stDirectory st))
     case mresult of
         Nothing ->
             return $
                 object
                     [ "sessionID" .= sid
+                    , "messageID" .= mMessageID
                     , "diff" .= ("" :: Text)
                     , "summary" .= toApiSummary (ST.SessionSummary 0 0 (Just 0))
                     ]
@@ -465,18 +507,19 @@ sessionDiffHandler st sid = liftIO $ do
             return $
                 object
                     [ "sessionID" .= sid
+                    , "messageID" .= mMessageID
                     , "diff" .= diff
                     , "summary" .= toApiSummary summary
                     ]
 
-sessionSummarizeHandler :: AppState -> Text -> Handler SessionSummary
+sessionSummarizeHandler :: AppState -> Text -> Handler Bool
 sessionSummarizeHandler st sid = do
     let ctx = sessionContext st
     summary <- liftIO $ loadSummary (unpack (stDirectory st))
     msession <- liftIO $ Sess.update ctx sid (\s -> s{ST.sessionSummary = Just summary})
     case msession of
         Nothing -> throwError err404
-        Just _ -> return $ toApiSummary summary
+        Just _ -> return True
 
 loadSummary :: FilePath -> IO ST.SessionSummary
 loadSummary root = do
@@ -516,21 +559,21 @@ sessionShellHandler st sid input = liftIO $ do
             Bus.publish (stBus st) "pty.created" (object ["info" .= info, "sessionID" .= sid])
             return $ Data.Aeson.toJSON info
 
-sessionRevertHandler :: AppState -> Text -> SessionRevert -> Handler SessionRevert
+sessionRevertHandler :: AppState -> Text -> SessionRevert -> Handler Session
 sessionRevertHandler st sid input = do
     let ctx = sessionContext st
     msession <- liftIO $ Sess.update ctx sid (\s -> s{ST.sessionRevert = Just (toInternalRevert input)})
     case msession of
         Nothing -> throwError err404
-        Just _ -> return input
+        Just session -> return $ toApiSession session
 
-sessionUnrevertHandler :: AppState -> Text -> Handler Bool
-sessionUnrevertHandler st sid = liftIO $ do
+sessionUnrevertHandler :: AppState -> Text -> Handler Session
+sessionUnrevertHandler st sid = do
     let ctx = sessionContext st
-    updated <- Sess.update ctx sid (\s -> s{ST.sessionRevert = Nothing})
-    return $ case updated of
-        Nothing -> False
-        Just _ -> True
+    msession <- liftIO $ Sess.update ctx sid (\s -> s{ST.sessionRevert = Nothing})
+    case msession of
+        Nothing -> throwError err404
+        Just session -> return $ toApiSession session
 
 sessionPermissionHandler :: AppState -> Text -> Text -> Value -> Handler Value
 sessionPermissionHandler st sid pid input = liftIO $ do
@@ -961,12 +1004,17 @@ findHandler st mQuery mPattern mDir = liftIO $ do
         (Nothing, Just p) -> FindSearch.findText root p
         (Nothing, Nothing) -> pure []
 
-findFileHandler :: AppState -> Maybe Text -> Maybe Text -> Handler [Value]
-findFileHandler st mPattern mDir = liftIO $ do
+findFileHandler :: AppState -> Maybe Text -> Maybe Text -> Maybe Bool -> Maybe Text -> Maybe Int -> Handler [Value]
+findFileHandler st mPattern mDir mDirs mType mLimit = liftIO $ do
     let root = maybe (unpack (stDirectory st)) unpack mDir
+    let opts = FindSearch.FindFileOptions
+            { FindSearch.ffoIncludeDirs = fromMaybe False mDirs
+            , FindSearch.ffoFileType = mType
+            , FindSearch.ffoLimit = mLimit
+            }
     case mPattern of
         Nothing -> pure []
-        Just p -> FindSearch.findFile root p
+        Just p -> FindSearch.findFileWithOptions root p opts
 
 findSymbolHandler :: AppState -> Maybe Text -> Maybe Text -> Handler [Value]
 findSymbolHandler st mQuery mDir = liftIO $ do
@@ -1059,6 +1107,14 @@ instanceDisposeHandler st = liftIO $ do
     Bus.publish (stBus st) "server.instance.disposed" (object [])
     return $ object ["disposed" .= True]
 
+-- | Handler for /global/dispose (same as /instance/dispose)
+globalDisposeHandler :: AppState -> Handler Value
+globalDisposeHandler = instanceDisposeHandler
+
+-- | Handler for /event - accepts directory query param to filter events
+eventHandler :: AppState -> Tagged Handler Application
+eventHandler = Event.eventHandler
+
 logHandler :: AppState -> Value -> Handler Value
 logHandler st input = liftIO $ do
     let lg = Log.withNS (stLogger st) "client"
@@ -1077,6 +1133,12 @@ formatterHandler st mDir = liftIO $ do
 
 experimentalToolIdsHandler :: Handler [Text]
 experimentalToolIdsHandler = return $ map ToolT.tdName Tool.allTools
+
+-- | List tools with JSON schema for a specific provider/model (GET /experimental/tool)
+experimentalToolListHandler :: AppState -> Text -> Text -> Maybe Text -> Handler [Value]
+experimentalToolListHandler _st _provider _model _mDir = liftIO $ do
+    -- Return tool definitions with their JSON schemas
+    return Tool.toolDefinitions
 
 experimentalToolHandler :: AppState -> Value -> Handler Value
 experimentalToolHandler st input = liftIO $ do
@@ -1098,6 +1160,16 @@ experimentalWorktreePostHandler st input = liftIO $ do
 experimentalWorktreeResetHandler :: AppState -> Value -> Handler Value
 experimentalWorktreeResetHandler st _ = liftIO $ do
     Worktree.resetInfo (stStorage st) (stDirectory st)
+
+-- | Delete a worktree and its branch (DELETE /experimental/worktree)
+experimentalWorktreeDeleteHandler :: AppState -> Value -> Handler Bool
+experimentalWorktreeDeleteHandler st input = liftIO $ do
+    -- Extract directory from input if provided
+    let mDir = extractText input "directory"
+    result <- Worktree.remove (stStorage st) (stDirectory st) mDir
+    case result of
+        Left _err -> return False
+        Right _ -> return True
 
 -- * PTY Handlers (sandboxed terminals)
 

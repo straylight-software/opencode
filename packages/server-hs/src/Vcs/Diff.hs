@@ -3,14 +3,26 @@
 module Vcs.Diff (
     parseNumstat,
     loadDiff,
+    VcsError (..),
 ) where
 
+import Control.Exception (Exception, throwIO)
 import Data.Char (isDigit)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Session.Types qualified as ST
+import System.Directory (findExecutable)
 import System.Exit (ExitCode (..))
 import System.Process (readProcessWithExitCode)
+
+-- | Error when git is not available
+data VcsError = GitNotFound
+    deriving (Eq)
+
+instance Show VcsError where
+    show GitNotFound = "Required tool 'git' not found in PATH. Install git: https://git-scm.com/"
+
+instance Exception VcsError
 
 parseNumstat :: Text -> ST.SessionSummary
 parseNumstat input =
@@ -34,9 +46,13 @@ parseNumstat input =
 
 loadDiff :: FilePath -> IO (Maybe (Text, ST.SessionSummary))
 loadDiff root = do
-    (diffCode, diffOut, _) <- readProcessWithExitCode "git" ["-C", root, "diff", "--no-color"] ""
-    (numCode, numOut, _) <- readProcessWithExitCode "git" ["-C", root, "diff", "--numstat"] ""
-    case (diffCode, numCode) of
-        (ExitSuccess, ExitSuccess) ->
-            pure $ Just (T.pack diffOut, parseNumstat (T.pack numOut))
-        _ -> pure Nothing
+    exe <- findExecutable "git"
+    case exe of
+        Nothing -> throwIO GitNotFound
+        Just _ -> do
+            (diffCode, diffOut, _) <- readProcessWithExitCode "git" ["-C", root, "diff", "--no-color"] ""
+            (numCode, numOut, _) <- readProcessWithExitCode "git" ["-C", root, "diff", "--numstat"] ""
+            case (diffCode, numCode) of
+                (ExitSuccess, ExitSuccess) ->
+                    pure $ Just (T.pack diffOut, parseNumstat (T.pack numOut))
+                _ -> pure Nothing

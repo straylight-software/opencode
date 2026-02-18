@@ -76,9 +76,9 @@ tests :: TestTree
 tests =
     testGroup
         "TUI Property Tests"
-        [ testProperty "append prompt" prop_appendPrompt
-        , testProperty "clear prompt" prop_clearPrompt
-        , testProperty "submit prompt" prop_submitPrompt
-        , testProperty "set/get last" prop_setLastRoundtrip
-        , testProperty "submit stores last" prop_submitStoresLast
+        [ testProperty "append prompt" (withTests 1000 prop_appendPrompt)
+        , testProperty "clear prompt" (withTests 1000 prop_clearPrompt)
+        , testProperty "submit prompt" (withTests 1000 prop_submitPrompt)
+        , testProperty "set/get last" (withTests 1000 prop_setLastRoundtrip)
+        , testProperty "submit stores last" (withTests 1000 prop_submitStoresLast)
         ]

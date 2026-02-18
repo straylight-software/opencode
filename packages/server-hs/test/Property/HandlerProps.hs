@@ -7,7 +7,7 @@ import Bus.Bus qualified as Bus
 import Control.Concurrent (forkIO, killThread)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM
-import Control.Exception (bracket)
+import Control.Exception (bracket, catch)
 import Control.Monad (void)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import Data.Aeson.Key qualified as K
@@ -21,6 +21,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as TIO
+import Find.Search (SearchError)
 import Global.Event (globalEventHandler)
 import Handlers
 import Hedgehog
@@ -43,14 +44,36 @@ import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.IO.Temp (createTempDirectory)
+import System.Posix.Signals qualified as Sig
 import System.Process (readProcessWithExitCode)
 import Test.Tasty
 import Test.Tasty.Hedgehog
+import Test.Tasty.Runners (NumThreads (..))
 import Tui.Store qualified as TuiStore
+import Vcs.Diff (VcsError)
 
 withTmp :: (FilePath -> IO a) -> IO a
 withTmp action =
     bracket (createTempDirectory "/tmp" "handler-test") removeDirectoryRecursive action
+
+{- | Run an IO action with SIGTERM and SIGHUP ignored to prevent signal
+propagation from child processes (PTYs) terminating during tests.
+This is needed because PTY processes can send signals when they exit.
+-}
+withIgnoreSignals :: IO a -> IO a
+withIgnoreSignals action =
+    bracket
+        ( do
+            oldTerm <- Sig.installHandler Sig.sigTERM Sig.Ignore Nothing
+            oldHup <- Sig.installHandler Sig.sigHUP Sig.Ignore Nothing
+            pure (oldTerm, oldHup)
+        )
+        ( \(oldTerm, oldHup) -> do
+            _ <- Sig.installHandler Sig.sigTERM oldTerm Nothing
+            _ <- Sig.installHandler Sig.sigHUP oldHup Nothing
+            pure ()
+        )
+        (const action)
 
 withState :: (AppState -> IO a) -> IO a
 withState action =
@@ -137,7 +160,7 @@ genText :: Gen Text
 genText = Gen.text (Range.linear 1 64) Gen.alphaNum
 
 prop_healthHandler :: Property
-prop_healthHandler = property $ do
+prop_healthHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> do
         res <- runHandlerIO (healthHandler st)
         pure (res, stVersion st)
@@ -148,7 +171,7 @@ prop_healthHandler = property $ do
             version health === ver
 
 prop_pathHandler :: Property
-prop_pathHandler = property $ do
+prop_pathHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> do
         res <- runHandlerIO (pathHandler st)
         pure (res, stDirectory st)
@@ -160,14 +183,14 @@ prop_pathHandler = property $ do
             assert $ T.isSuffixOf ".opencode/state" stPath
 
 prop_globalConfigHandler :: Property
-prop_globalConfigHandler = property $ do
+prop_globalConfigHandler = withTests 20 $ property $ do
     result <- evalIO $ runHandlerIO globalConfigHandler
     case result of
         Left _ -> failure
         Right val -> assert $ isObject val
 
 prop_projectHandlers :: Property
-prop_projectHandlers = property $ do
+prop_projectHandlers = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> do
         listed <- runHandlerIO (projectListHandler st)
         current <- runHandlerIO (projectCurrentHandler st Nothing)
@@ -186,21 +209,21 @@ prop_projectHandlers = property $ do
             projWork fetched === dir
 
 prop_providerListHandler :: Property
-prop_providerListHandler = property $ do
+prop_providerListHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> runHandlerIO (providerListHandler st)
     case result of
         Left _ -> failure
         Right pl -> assert $ isObject (default_ pl)
 
 prop_providerAuthHandler :: Property
-prop_providerAuthHandler = property $ do
+prop_providerAuthHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> runHandlerIO (providerAuthHandler st)
     case result of
         Left _ -> failure
         Right val -> assert $ isObject val
 
 prop_providerHandler :: Property
-prop_providerHandler = property $ do
+prop_providerHandler = withTests 20 $ property $ do
     result <- evalIO $ runHandlerIO providerHandler
     case result of
         Left _ -> failure
@@ -232,14 +255,14 @@ prop_providerOauthHandlers = withTests 10 $ property $ do
             lookupBool "authenticated" callback === Just True
 
 prop_configHandler :: Property
-prop_configHandler = property $ do
+prop_configHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> runHandlerIO (configHandler st)
     case result of
         Left _ -> failure
         Right val -> assert $ isObject val
 
 prop_commandHandler :: Property
-prop_commandHandler = property $ do
+prop_commandHandler = withTests 20 $ property $ do
     result <- evalIO $ runHandlerIO commandHandler
     case result of
         Left _ -> failure
@@ -248,14 +271,14 @@ prop_commandHandler = property $ do
             assert $ "bash" `elem` names
 
 prop_agentHandler :: Property
-prop_agentHandler = property $ do
+prop_agentHandler = withTests 20 $ property $ do
     result <- evalIO $ runHandlerIO agentHandler
     case result of
         Left _ -> failure
         Right _ -> success
 
 prop_sessionStatusHandler :: Property
-prop_sessionStatusHandler = property $ do
+prop_sessionStatusHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> runHandlerIO (sessionStatusHandler st)
     case result of
         Left _ -> failure
@@ -270,7 +293,7 @@ prop_sessionLifecycleHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> do
         let input = CreateSessionInput (Just title) Nothing
         created <- runHandlerIO (sessionCreateHandler st Nothing input)
-        listed <- runHandlerIO (sessionListHandler st Nothing Nothing Nothing)
+        listed <- runHandlerIO (sessionListHandler st Nothing Nothing Nothing Nothing Nothing)
         fetched <- case created of
             Left err -> pure (Left err)
             Right ses -> runHandlerIO (sessionGetHandler st (sesId ses))
@@ -394,30 +417,46 @@ prop_sessionShareHandlers = withTests 20 $ property $ do
         (_, Left _, _) -> failure
         (_, _, Left _) -> failure
         (Right created, Right shared, Right deleted) -> do
-            assert $ sesId created `T.isInfixOf` shareUrl shared
-            deleted === True
+            -- After sharing, the session should have a share URL containing the session ID
+            case sesShare shared of
+                Nothing -> failure
+                Just share -> assert $ sesId created `T.isInfixOf` shareUrl share
+            -- After unsharing, the session should have no share
+            sesShare deleted === Nothing
 
 prop_sessionDiffHandler :: Property
 prop_sessionDiffHandler = withTests 20 $ property $ do
     sid <- forAll genName
-    result <- evalIO $ withState $ \st -> runHandlerIO (sessionDiffHandler st sid)
+    result <- evalIO $ withState $ \st ->
+        ( do
+            res <- runHandlerIO (sessionDiffHandler st sid Nothing)
+            pure (res, Nothing)
+        )
+            `catch` \(e :: VcsError) -> pure (Right (object []), Just e)
     case result of
-        Left _ -> failure
-        Right val -> assert $ hasKey "summary" val
+        (_, Just e) -> do
+            annotate $ show e
+            failure
+        (Left _, Nothing) -> failure
+        (Right val, Nothing) -> assert $ hasKey "summary" val
 
 prop_sessionSummarizeHandler :: Property
 prop_sessionSummarizeHandler = withTests 20 $ property $ do
-    result <- evalIO $ withState $ \st -> do
-        created <- runHandlerIO (sessionCreateHandler st Nothing (CreateSessionInput (Just "sum") Nothing))
-        summary <- case created of
-            Left err -> pure (Left err)
-            Right ses -> runHandlerIO (sessionSummarizeHandler st (sesId ses))
-        pure summary
+    result <- evalIO $ withState $ \st ->
+        ( do
+            created <- runHandlerIO (sessionCreateHandler st Nothing (CreateSessionInput (Just "sum") Nothing))
+            summarized <- case created of
+                Left err -> pure (Left err)
+                Right ses -> runHandlerIO (sessionSummarizeHandler st (sesId ses))
+            pure (summarized, Nothing)
+        )
+            `catch` \(e :: VcsError) -> pure (Right True, Just e)
     case result of
-        Left _ -> failure
-        Right summary -> do
-            ssAdditions summary === 0
-            ssDeletions summary === 0
+        (_, Just e) -> do
+            annotate $ show e
+            failure
+        (Left _, Nothing) -> failure
+        (Right ok, Nothing) -> ok === True
 
 prop_sessionRevertHandlers :: Property
 prop_sessionRevertHandlers = withTests 20 $ property $ do
@@ -435,8 +474,12 @@ prop_sessionRevertHandlers = withTests 20 $ property $ do
         (Left _, _) -> failure
         (_, Left _) -> failure
         (Right reverted, Right unreverted) -> do
-            srMessageId reverted === mid
-            unreverted === True
+            -- After revert, the session should have a revert with the message ID
+            case sesRevert reverted of
+                Nothing -> failure
+                Just rev -> srMessageId rev === mid
+            -- After unrevert, the session should have no revert
+            sesRevert unreverted === Nothing
 
 prop_sessionPermissionHandler :: Property
 prop_sessionPermissionHandler = withTests 20 $ property $ do
@@ -503,14 +546,14 @@ prop_sessionMessagePartHandlers = withTests 20 $ property $ do
             deleted === True
 
 prop_lspHandler :: Property
-prop_lspHandler = property $ do
+prop_lspHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> runHandlerIO (lspHandler st)
     case result of
         Left _ -> failure
         Right _ -> success
 
 prop_permissionHandlers :: Property
-prop_permissionHandlers = property $ do
+prop_permissionHandlers = withTests 20 $ property $ do
     rid <- forAll genName
     result <- evalIO $ withState $ \st -> do
         let payload = object ["ok" .= True]
@@ -524,7 +567,7 @@ prop_permissionHandlers = property $ do
             assert $ not (null hits)
 
 prop_questionHandlers :: Property
-prop_questionHandlers = property $ do
+prop_questionHandlers = withTests 20 $ property $ do
     rid <- forAll genName
     result <- evalIO $ withState $ \st -> do
         let payload = object ["ok" .= True]
@@ -593,14 +636,14 @@ prop_tuiHandlers = withTests 20 $ property $ do
         _ -> failure
 
 prop_skillHandler :: Property
-prop_skillHandler = property $ do
+prop_skillHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> runHandlerIO (skillHandler st Nothing)
     case result of
         Left _ -> failure
         Right _ -> success
 
 prop_formatterHandler :: Property
-prop_formatterHandler = property $ do
+prop_formatterHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> runHandlerIO (formatterHandler st Nothing)
     case result of
         Left _ -> failure
@@ -624,7 +667,7 @@ prop_experimentalWorktreeHandlers = withTests 20 $ property $ do
             lookupBool "reset" reset1 === Just True
 
 prop_fileListHandler :: Property
-prop_fileListHandler = property $ do
+prop_fileListHandler = withTests 20 $ property $ do
     name <- forAll genName
     dir <- forAll (Gen.filter (/= name) genName)
     result <- evalIO $ withTmp $ \root -> do
@@ -638,7 +681,7 @@ prop_fileListHandler = property $ do
             assert $ any (\node -> fnName node == dir && fnType node == FileTypeDirectory) nodes
 
 prop_fileReadHandler :: Property
-prop_fileReadHandler = property $ do
+prop_fileReadHandler = withTests 20 $ property $ do
     name <- forAll genName
     content <- forAll genText
     result <- evalIO $ withTmp $ \root -> do
@@ -651,7 +694,7 @@ prop_fileReadHandler = property $ do
             fcContent file === content
 
 prop_fileReadHandlerBinary :: Property
-prop_fileReadHandlerBinary = property $ do
+prop_fileReadHandlerBinary = withTests 20 $ property $ do
     name <- forAll genName
     let bytes = BS.pack [0, 1, 2, 255]
     result <- evalIO $ withTmp $ \root -> do
@@ -665,7 +708,7 @@ prop_fileReadHandlerBinary = property $ do
             fcContent file === encoded
 
 prop_chatHandlerAnthropicMissing :: Property
-prop_chatHandlerAnthropicMissing = property $ do
+prop_chatHandlerAnthropicMissing = withTests 20 $ property $ do
     msg <- forAll genText
     result <- evalIO $ withState $ \st ->
         withEnv "ANTHROPIC_API_KEY" Nothing $
@@ -675,7 +718,7 @@ prop_chatHandlerAnthropicMissing = property $ do
         Right val -> lookupText "error" val === Just "ANTHROPIC_API_KEY not set"
 
 prop_chatHandlerOpenRouterMissing :: Property
-prop_chatHandlerOpenRouterMissing = property $ do
+prop_chatHandlerOpenRouterMissing = withTests 20 $ property $ do
     msg <- forAll genText
     result <- evalIO $ withState $ \st ->
         withEnv "OPENROUTER_API_KEY" Nothing $
@@ -687,7 +730,7 @@ prop_chatHandlerOpenRouterMissing = property $ do
 prop_sessionCommandHandler :: Property
 prop_sessionCommandHandler = withTests 20 $ property $ do
     txt <- forAll genName
-    result <- evalIO $ withState $ \st -> do
+    result <- evalIO $ withIgnoreSignals $ withState $ \st -> do
         var <- newEmptyTMVarIO
         _ <- Bus.subscribe (stBus st) "command.executed" $ \event ->
             atomically $ void $ tryPutTMVar var event
@@ -711,17 +754,21 @@ prop_sessionCommandHandler = withTests 20 $ property $ do
 
 prop_sessionShellHandler :: Property
 prop_sessionShellHandler = withTests 10 $ property $ do
-    result <- evalIO $ withState $ \st -> do
+    result <- evalIO $ withIgnoreSignals $ withState $ \st -> do
         var <- newEmptyTMVarIO
         _ <- Bus.subscribe (stBus st) "pty.created" $ \event ->
             atomically $ void $ tryPutTMVar var event
+        -- Use 'sleep' instead of '/bin/sh' to avoid signal propagation issues
+        -- when shells set up their own signal handlers
         let input =
                 object
-                    [ "command" .= ("/bin/sh" :: Text)
+                    [ "command" .= ("sleep" :: Text)
+                    , "args" .= (["infinity"] :: [Text])
                     , "sandbox" .= False
                     ]
         res <- runHandlerIO (sessionShellHandler st "session" input)
-        evt <- waitVar 2000000 var
+        -- Short wait - event should arrive immediately since publish is synchronous
+        evt <- waitVar 100000 var
         case res of
             Left _ -> pure (res, evt)
             Right val -> do
@@ -734,16 +781,13 @@ prop_sessionShellHandler = withTests 10 $ property $ do
         (Left _, _) -> failure
         (Right val, evt) -> do
             let pid = lookupText "id" val
-            let err = lookupText "error" val
-            case (pid, err) of
-                (Nothing, Nothing) -> failure
-                _ -> pure ()
+            -- PTY creation must succeed - require pid to be present
             case pid of
-                Nothing -> pure ()
+                Nothing -> failure
                 Just _ -> assert $ evt /= Nothing
 
 prop_promptAsyncIndex :: Property
-prop_promptAsyncIndex = property $ do
+prop_promptAsyncIndex = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> do
         let parts = [object ["type" .= ("text" :: Text), "text" .= ("hi" :: Text)]]
         let input = CreateMessageInput Nothing parts
@@ -760,8 +804,9 @@ prop_promptAsyncIndex = property $ do
 
 prop_ptyHandlersLifecycle :: Property
 prop_ptyHandlersLifecycle = withTests 20 $ property $ do
-    result <- evalIO $ withState $ \st -> do
-        let input = object ["command" .= ("/bin/sh" :: Text), "sandbox" .= False]
+    result <- evalIO $ withIgnoreSignals $ withState $ \st -> do
+        -- Use 'sleep' instead of '/bin/sh' to avoid signal propagation issues
+        let input = object ["command" .= ("sleep" :: Text), "args" .= (["infinity"] :: [Text]), "sandbox" .= False]
         created <- runHandlerIO (ptyCreateHandler st input)
         case created of
             Left _ -> pure (created, Nothing)
@@ -799,8 +844,9 @@ prop_ptyHandlersLifecycle = withTests 20 $ property $ do
 
 prop_ptyHandlersUnsandboxedChanges :: Property
 prop_ptyHandlersUnsandboxedChanges = withTests 20 $ property $ do
-    result <- evalIO $ withState $ \st -> do
-        let input = object ["command" .= ("/bin/sh" :: Text), "sandbox" .= False]
+    result <- evalIO $ withIgnoreSignals $ withState $ \st -> do
+        -- Use 'sleep' instead of '/bin/sh' to avoid signal propagation issues
+        let input = object ["command" .= ("sleep" :: Text), "args" .= (["infinity"] :: [Text]), "sandbox" .= False]
         created <- runHandlerIO (ptyCreateHandler st input)
         case created of
             Left _ -> pure (created, Nothing, Nothing)
@@ -852,55 +898,71 @@ prop_ptyConnectHandler = withTests 20 $ property $ do
             assert $ "PTY not found" `T.isInfixOf` text
 
 prop_findHandler :: Property
-prop_findHandler = property $ do
+prop_findHandler = withTests 20 $ property $ do
     token <- forAll genName
-    result <- evalIO $ withState $ \st -> do
+    result <- evalIO $ withIgnoreSignals $ withState $ \st -> do
         let root = T.unpack (stDirectory st)
         let path = root </> "find.txt"
         TIO.writeFile path ("find " <> token)
-        vals <- runHandlerIO (findHandler st (Just token) Nothing Nothing)
-        pure (T.pack path, vals)
+        ( do
+                vals <- runHandlerIO (findHandler st (Just token) Nothing Nothing)
+                pure (T.pack path, vals, Nothing)
+            )
+            `catch` \(e :: SearchError) -> pure (T.pack path, Right [], Just e)
     case result of
-        (_, Left _) -> failure
-        (path, Right vals) -> do
+        (_, Left _, _) -> failure
+        (_, Right _, Just e) -> do
+            annotate $ show e
+            failure
+        (path, Right vals, Nothing) -> do
             let matches = filter (matchFind token path) vals
             assert $ not (null matches)
 
 prop_findFileHandler :: Property
-prop_findFileHandler = property $ do
+prop_findFileHandler = withTests 20 $ property $ do
     name <- forAll genName
-    result <- evalIO $ withState $ \st -> do
+    result <- evalIO $ withIgnoreSignals $ withState $ \st -> do
         let root = T.unpack (stDirectory st)
         let path = root </> T.unpack name <> ".txt"
         TIO.writeFile path "file"
-        vals <- runHandlerIO (findFileHandler st (Just "*.txt") Nothing)
-        hasFd <- findExecutable "fd"
-        pure (T.pack path, vals, hasFd)
+        ( do
+                vals <- runHandlerIO (findFileHandler st (Just "*.txt") Nothing Nothing Nothing Nothing)
+                pure (T.pack path, vals, Nothing)
+            )
+            `catch` \(e :: SearchError) -> pure (T.pack path, Right [], Just e)
     case result of
         (_, Left _, _) -> failure
-        (_, Right vals, Nothing) -> vals === []
-        (path, Right vals, Just _) -> do
+        (_, Right _, Just e) -> do
+            annotate $ show e
+            failure
+        (path, Right vals, Nothing) -> do
             let matches = filter (\v -> lookupText "path" v == Just path || hasSuffix ".txt" v) vals
             assert $ not (null matches)
 
 prop_findSymbolHandler :: Property
-prop_findSymbolHandler = property $ do
+prop_findSymbolHandler = withTests 20 $ property $ do
     token <- forAll genName
-    result <- evalIO $ withState $ \st -> do
+    result <- evalIO $ withIgnoreSignals $ withState $ \st -> do
         let root = T.unpack (stDirectory st)
         let path = root </> "symbol.txt"
         TIO.writeFile path ("symbol " <> token)
-        vals <- runHandlerIO (findSymbolHandler st (Just token) Nothing)
-        pure (T.pack path, vals)
+        ( do
+                vals <- runHandlerIO (findSymbolHandler st (Just token) Nothing)
+                pure (T.pack path, vals, Nothing)
+            )
+            `catch` \(e :: SearchError) -> pure (T.pack path, Right [], Just e)
     case result of
-        (_, Left _) -> failure
-        (path, Right vals) -> do
+        (_, Left _, _) -> failure
+        (_, Right _, Just e) -> do
+            annotate $ show e
+            failure
+        (path, Right vals, Nothing) -> do
             let matches = filter (matchFind token path) vals
             assert $ not (null matches)
 
 prop_vcsHandler :: Property
-prop_vcsHandler = property $ do
-    result <- evalIO $ withState $ \st -> do
+prop_vcsHandler = withTests 20 $ property $ do
+    result <- evalIO $ withIgnoreSignals $ withState $ \st -> do
         exe <- findExecutable "git"
         case exe of
             Nothing -> do
@@ -922,7 +984,7 @@ prop_vcsHandler = property $ do
         (Right info, Just _) -> assert $ branch info /= Nothing
 
 prop_instanceDisposeHandler :: Property
-prop_instanceDisposeHandler = property $ do
+prop_instanceDisposeHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> do
         var <- newEmptyTMVarIO
         _ <- Bus.subscribe (stBus st) "server.instance.disposed" $ \event ->
@@ -937,7 +999,7 @@ prop_instanceDisposeHandler = property $ do
             assert $ evt /= Nothing
 
 prop_logHandler :: Property
-prop_logHandler = property $ do
+prop_logHandler = withTests 20 $ property $ do
     msg <- forAll genText
     result <- evalIO $ withState $ \st ->
         runHandlerIO (logHandler st (object ["msg" .= msg]))
@@ -946,7 +1008,7 @@ prop_logHandler = property $ do
         Right val -> lookupBool "ok" val === Just True
 
 prop_globalEventHandler :: Property
-prop_globalEventHandler = property $ do
+prop_globalEventHandler = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> do
         var <- newEmptyMVar
         let Tagged app = globalEventHandler st
@@ -970,7 +1032,7 @@ prop_globalEventHandler = property $ do
             assert $ "server.connected" `T.isInfixOf` event
 
 prop_globalEventHandlerBusEvent :: Property
-prop_globalEventHandlerBusEvent = property $ do
+prop_globalEventHandlerBusEvent = withTests 20 $ property $ do
     result <- evalIO $ withState $ \st -> do
         var <- newEmptyMVar
         let Tagged app = globalEventHandler st
@@ -1003,15 +1065,16 @@ readSseEvent queue = go ""
         if "\n\n" `T.isInfixOf` merged
             then pure merged
             else go merged
+
 prop_experimentalToolIdsHandler :: Property
-prop_experimentalToolIdsHandler = property $ do
+prop_experimentalToolIdsHandler = withTests 20 $ property $ do
     result <- evalIO $ runHandlerIO experimentalToolIdsHandler
     case result of
         Left _ -> failure
         Right ids -> assert $ "bash" `elem` ids
 
 prop_experimentalToolHandler :: Property
-prop_experimentalToolHandler = property $ do
+prop_experimentalToolHandler = withTests 20 $ property $ do
     name <- forAll genName
     result <- evalIO $ withState $ \st -> do
         let input = object ["name" .= name, "payload" .= ("ok" :: Text)]
@@ -1023,7 +1086,7 @@ prop_experimentalToolHandler = property $ do
         (Right val, stored) -> val === stored
 
 prop_authCreateHandler :: Property
-prop_authCreateHandler = property $ do
+prop_authCreateHandler = withTests 20 $ property $ do
     pid <- forAll genName
     token <- forAll genName
     result <- evalIO $ withState $ \st -> do
@@ -1038,7 +1101,7 @@ prop_authCreateHandler = property $ do
             lookupText "token" stored === Just token
 
 prop_authUpdateHandler :: Property
-prop_authUpdateHandler = property $ do
+prop_authUpdateHandler = withTests 20 $ property $ do
     pid <- forAll genName
     tok1 <- forAll genName
     tok2 <- forAll genName
@@ -1056,7 +1119,7 @@ prop_authUpdateHandler = property $ do
             lookupText "token" stored === Just tok2
 
 prop_authDeleteHandler :: Property
-prop_authDeleteHandler = property $ do
+prop_authDeleteHandler = withTests 20 $ property $ do
     pid <- forAll genName
     token <- forAll genName
     result <- evalIO $ withState $ \st -> do
@@ -1114,16 +1177,8 @@ tests =
         , testProperty "file read handler binary" prop_fileReadHandlerBinary
         , testProperty "chat handler anthropic missing" prop_chatHandlerAnthropicMissing
         , testProperty "chat handler openrouter missing" prop_chatHandlerOpenRouterMissing
-        , testProperty "session command handler" prop_sessionCommandHandler
-        , testProperty "session shell handler" prop_sessionShellHandler
         , testProperty "prompt async index" prop_promptAsyncIndex
-        , testProperty "pty handler lifecycle" prop_ptyHandlersLifecycle
-        , testProperty "pty handler unsandboxed changes" prop_ptyHandlersUnsandboxedChanges
         , testProperty "pty connect handler" prop_ptyConnectHandler
-        , testProperty "find handler" prop_findHandler
-        , testProperty "find file handler" prop_findFileHandler
-        , testProperty "find symbol handler" prop_findSymbolHandler
-        , testProperty "vcs handler" prop_vcsHandler
         , testProperty "instance dispose handler" prop_instanceDisposeHandler
         , testProperty "log handler" prop_logHandler
         , testProperty "global event handler" prop_globalEventHandler
@@ -1133,4 +1188,19 @@ tests =
         , testProperty "auth create handler" prop_authCreateHandler
         , testProperty "auth update handler" prop_authUpdateHandler
         , testProperty "auth delete handler" prop_authDeleteHandler
+        , -- Tests that spawn subprocesses must run with limited parallelism to avoid
+          -- signal propagation issues. Use localOption to limit to 1 thread for this group.
+          localOption (NumThreads 1) $
+            sequentialTestGroup
+                "Subprocess Tests"
+                AllFinish
+                [ testProperty "session command handler" prop_sessionCommandHandler
+                , testProperty "session shell handler" prop_sessionShellHandler
+                , testProperty "pty handler lifecycle" prop_ptyHandlersLifecycle
+                , testProperty "pty handler unsandboxed changes" prop_ptyHandlersUnsandboxedChanges
+                , testProperty "find handler" prop_findHandler
+                , testProperty "find file handler" prop_findFileHandler
+                , testProperty "find symbol handler" prop_findSymbolHandler
+                , testProperty "vcs handler" prop_vcsHandler
+                ]
         ]

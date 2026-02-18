@@ -155,7 +155,8 @@ checkAuth storage provider = do
     stored <-
         Control.Exception.catch
             (Just <$> (Storage.read storage ["auth", providerId provider] :: IO Value))
-            (\(Storage.NotFoundError _) -> pure Nothing)
+            -- Catch NotFoundError and any other exceptions (including JSON decode errors)
+            (\(_ :: Control.Exception.SomeException) -> pure Nothing)
     envAuth <- anyM hasEnv (providerEnv provider)
     let storedMethod = stored >>= extractMethod
     let hasAuth = stored /= Nothing || envAuth

@@ -48,7 +48,8 @@ import Data.Word (Word64)
 import System.Directory (findExecutable)
 import System.Exit (ExitCode (..))
 import System.Posix.Pty (Pty, closePty, readPty, resizePty, spawnWithPty, writePty)
-import System.Process (ProcessHandle, getPid, terminateProcess, waitForProcess)
+import System.Posix.Signals qualified as Sig
+import System.Process (ProcessHandle, getPid, getProcessExitCode, terminateProcess, waitForProcess)
 
 import Data.ByteString qualified as BS
 import Data.Map.Strict qualified as Map
@@ -346,14 +347,34 @@ remove PtyManager{..} ptyId = do
     case mSession of
         Nothing -> pure False
         Just session -> do
-            terminateProcess (rpsProcess session)
+            -- Close the PTY first to signal EOF to the process
             void $ try @SomeException $ closePty (rpsPty session)
+            -- Terminate the process
+            terminateProcess (rpsProcess session)
+            -- Wait briefly for process to exit (poll a few times)
+            waitForExit 5 (rpsProcess session)
 
             case rpsOverlayDir session of
                 Nothing -> pure ()
                 Just dir -> void $ try @SomeException $ Sandbox.destroyDir dir
 
             pure True
+  where
+    -- Poll for process exit with limited attempts, then SIGKILL
+    waitForExit :: Int -> ProcessHandle -> IO ()
+    waitForExit 0 ph = do
+        -- Process didn't exit with SIGTERM, send SIGKILL
+        mpid <- getPid ph
+        case mpid of
+            Nothing -> pure ()
+            Just pid -> void $ try @SomeException $ Sig.signalProcess Sig.sigKILL pid
+    waitForExit n ph = do
+        code <- getProcessExitCode ph
+        case code of
+            Just _ -> pure ()
+            Nothing -> do
+                threadDelay 10000 -- 10ms
+                waitForExit (n - 1) ph
 
 -- | Write data to a PTY
 write :: PtyManager -> Text -> ByteString -> IO Bool

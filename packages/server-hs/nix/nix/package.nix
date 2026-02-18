@@ -1,13 +1,31 @@
-{ inputs, ... }:
+{ inputs, lib, ... }:
 {
   imports = [ inputs.haskell-flake.flakeModule ];
 
   perSystem =
     { self', pkgs, ... }:
+    let
+      runtimePkgs = with pkgs; [
+        ripgrep
+        git
+        fd
+      ];
+
+      withRuntimeDeps = pkgs.writeShellApplication {
+        name = "opencode-server";
+        runtimeInputs = runtimePkgs;
+        text = ''
+          exec ${lib.getExe self'.packages.opencode-server}
+        '';
+      };
+    in
     {
       haskellProjects.default = {
         settings = {
-          opencode-server.stan = true;
+          opencode-server = {
+            stan = true;
+            extraTestToolDepends = runtimePkgs;
+          };
           librarySystemDepends = [ pkgs.zlib ];
         };
         devShell = {
@@ -15,12 +33,12 @@
             cabal = hp.cabal-install;
           };
           mkShellArgs = {
-            packages = [ pkgs.zlib ];
+            buildInputs = runtimePkgs;
           };
         };
       };
 
-      packages.default = self'.packages.opencode-server;
-      checks.default = self'.packages.opencode-server;
+      packages.default = withRuntimeDeps;
+      checks.default = withRuntimeDeps;
     };
 }

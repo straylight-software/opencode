@@ -4,7 +4,9 @@ module Experimental.Worktree (
     getInfo,
     setInfo,
     resetInfo,
-) where
+    remove,
+)
+where
 
 import Control.Exception (catch)
 import Data.Aeson (Value, object, (.=))
@@ -31,3 +33,13 @@ resetInfo storage root = do
     let value = object ["root" .= root, "reset" .= True]
     Storage.write storage worktreeKey value
     pure value
+
+-- | Remove a worktree
+remove :: Storage.StorageConfig -> Text -> Maybe Text -> IO (Either Text ())
+remove storage _root _mDir = do
+    -- Remove worktree info from storage
+    _ <- (Storage.remove storage worktreeKey >> pure (Right ())) `catch` handler
+    pure (Right ())
+  where
+    handler :: Storage.NotFoundError -> IO (Either Text ())
+    handler _ = pure (Right ())

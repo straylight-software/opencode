@@ -142,7 +142,7 @@ genQueryParam paramName = case T.unpack paramName of
 -- | Build URL with path and query parameters
 buildUrl :: T.Text -> [T.Text] -> [(T.Text, T.Text)] -> T.Text
 buildUrl base pathParams queryParams =
-    let path = foldl (\acc p -> T.replace ("{" <> p <> "}") p acc) base pathParams
+    let path = foldl' (\acc p -> T.replace ("{" <> p <> "}") p acc) base pathParams
         query = T.intercalate "&" $ map (\(k, v) -> k <> "=" <> v) queryParams
      in if T.null query then path else path <> "?" <> query
 

@@ -5,13 +5,13 @@ module Lsp.Store (
     setDiagnostics,
 ) where
 
-import Control.Exception (catch)
+import Control.Exception (SomeException, try)
 import Data.Aeson (Value (..))
 import Data.Aeson qualified as Aeson
 import Data.Foldable (toList)
 import Data.Text (Text)
 import Storage.Storage qualified as Storage
-import System.Directory (doesFileExist)
+import System.Directory (canonicalizePath, doesFileExist)
 import System.FilePath (takeDirectory, (</>))
 
 diagKey :: [Text]
@@ -19,10 +19,12 @@ diagKey = ["lsp", "diagnostics"]
 
 getDiagnostics :: Storage.StorageConfig -> IO [Value]
 getDiagnostics storage = do
-    result <- (Just <$> Storage.read storage diagKey) `catch` \(Storage.NotFoundError _) -> pure Nothing
+    -- First try to read from Storage
+    result <- try @SomeException (Storage.read storage diagKey)
     case result of
-        Just (Array xs) -> pure (toList xs)
-        _ -> getDiagnosticsFile storage
+        Right (Array xs) -> pure (toList xs)
+        Right _ -> getDiagnosticsFile storage
+        Left _ -> getDiagnosticsFile storage
 
 setDiagnostics :: Storage.StorageConfig -> [Value] -> IO ()
 setDiagnostics storage values =
@@ -30,7 +32,8 @@ setDiagnostics storage values =
 
 getDiagnosticsFile :: Storage.StorageConfig -> IO [Value]
 getDiagnosticsFile storage = do
-    let dir = Storage.storageDir storage
+    -- Canonicalize to resolve symlinks (important in nix sandbox)
+    dir <- canonicalizePath (Storage.storageDir storage)
     readFromPaths (diagnosticPaths dir)
 
 diagnosticPaths :: FilePath -> [FilePath]

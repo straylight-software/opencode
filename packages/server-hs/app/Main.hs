@@ -84,8 +84,10 @@ server st =
     healthHandler st
         :<|> pathHandler st
         :<|> globalConfigHandler
+        :<|> globalConfigUpdateHandler
         :<|> projectListHandler st
         :<|> projectGetHandler st
+        :<|> projectUpdateHandler st
         :<|> projectCurrentHandler st
         :<|> providerListHandler st
         :<|> providerAuthHandler st
@@ -97,6 +99,7 @@ server st =
         :<|> authDeleteHandler st
         :<|> agentHandler
         :<|> configHandler st
+        :<|> configUpdateHandler st
         :<|> commandHandler
         :<|> sessionStatusHandler st
         :<|> sessionListHandler st
@@ -162,14 +165,18 @@ server st =
         :<|> tuiControlHandler st "next"
         :<|> tuiControlHandler st "response"
         :<|> instanceDisposeHandler st
+        :<|> globalDisposeHandler st
+        :<|> eventHandler st
         :<|> logHandler st
         :<|> skillHandler st
         :<|> formatterHandler st
         :<|> experimentalToolIdsHandler
+        :<|> experimentalToolListHandler st
         :<|> experimentalToolHandler st
         :<|> experimentalWorktreeGetHandler st
         :<|> experimentalWorktreePostHandler st
         :<|> experimentalWorktreeResetHandler st
+        :<|> experimentalWorktreeDeleteHandler st
         -- LLM
         :<|> chatHandler st
 

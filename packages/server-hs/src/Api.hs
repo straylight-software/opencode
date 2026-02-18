@@ -393,6 +393,9 @@ type PathAPI = "path" :> Get '[JSON] PathInfo
 -- /global/config
 type GlobalConfigAPI = "global" :> "config" :> Get '[JSON] Value
 
+-- /global/config (Update - PATCH)
+type GlobalConfigUpdateAPI = "global" :> "config" :> ReqBody '[JSON] Value :> Patch '[JSON] Value
+
 -- /project
 type ProjectListAPI = "project" :> Get '[JSON] [Project]
 
@@ -411,6 +414,9 @@ type AgentAPI = "agent" :> Get '[JSON] [Value]
 -- /config
 type ConfigAPI = "config" :> Get '[JSON] Value
 
+-- /config (Update)
+type ConfigUpdateAPI = "config" :> ReqBody '[JSON] Value :> Patch '[JSON] Value
+
 -- /command
 type CommandAPI = "command" :> Get '[JSON] [Value]
 
@@ -418,7 +424,7 @@ type CommandAPI = "command" :> Get '[JSON] [Value]
 type SessionStatusAPI = "session" :> "status" :> Get '[JSON] Value
 
 -- /session (List)
-type SessionListAPI = "session" :> QueryParam "directory" Text :> QueryParam "roots" Bool :> QueryParam "limit" Int :> Get '[JSON] [Session]
+type SessionListAPI = "session" :> QueryParam "directory" Text :> QueryParam "roots" Bool :> QueryParam "limit" Int :> QueryParam "start" Int :> QueryParam "search" Text :> Get '[JSON] [Session]
 
 -- /session (Create)
 type SessionCreateAPI = "session" :> QueryParam "directory" Text :> ReqBody '[JSON] CreateSessionInput :> Post '[JSON] Session
@@ -448,15 +454,15 @@ type SessionForkAPI = "session" :> Capture "sessionID" Text :> "fork" :> Post '[
 type SessionAbortAPI = "session" :> Capture "sessionID" Text :> "abort" :> Post '[JSON] Value
 
 -- /session/:sessionID/share
-type SessionShareCreateAPI = "session" :> Capture "sessionID" Text :> "share" :> Post '[JSON] SessionShare
+type SessionShareCreateAPI = "session" :> Capture "sessionID" Text :> "share" :> Post '[JSON] Session
 
-type SessionShareDeleteAPI = "session" :> Capture "sessionID" Text :> "share" :> Delete '[JSON] Bool
+type SessionShareDeleteAPI = "session" :> Capture "sessionID" Text :> "share" :> Delete '[JSON] Session
 
 -- /session/:sessionID/diff
-type SessionDiffAPI = "session" :> Capture "sessionID" Text :> "diff" :> Get '[JSON] Value
+type SessionDiffAPI = "session" :> Capture "sessionID" Text :> "diff" :> QueryParam "messageID" Text :> Get '[JSON] Value
 
 -- /session/:sessionID/summarize
-type SessionSummarizeAPI = "session" :> Capture "sessionID" Text :> "summarize" :> Post '[JSON] SessionSummary
+type SessionSummarizeAPI = "session" :> Capture "sessionID" Text :> "summarize" :> Post '[JSON] Bool
 
 -- /session/:sessionID/command
 type SessionCommandAPI = "session" :> Capture "sessionID" Text :> "command" :> ReqBody '[JSON] Value :> Post '[JSON] Value
@@ -465,10 +471,10 @@ type SessionCommandAPI = "session" :> Capture "sessionID" Text :> "command" :> R
 type SessionShellAPI = "session" :> Capture "sessionID" Text :> "shell" :> ReqBody '[JSON] Value :> Post '[JSON] Value
 
 -- /session/:sessionID/revert
-type SessionRevertAPI = "session" :> Capture "sessionID" Text :> "revert" :> ReqBody '[JSON] SessionRevert :> Post '[JSON] SessionRevert
+type SessionRevertAPI = "session" :> Capture "sessionID" Text :> "revert" :> ReqBody '[JSON] SessionRevert :> Post '[JSON] Session
 
 -- /session/:sessionID/unrevert
-type SessionUnrevertAPI = "session" :> Capture "sessionID" Text :> "unrevert" :> Post '[JSON] Bool
+type SessionUnrevertAPI = "session" :> Capture "sessionID" Text :> "unrevert" :> Post '[JSON] Session
 
 -- /session/:sessionID/permissions/:permissionID
 type SessionPermissionAPI = "session" :> Capture "sessionID" Text :> "permissions" :> Capture "permissionID" Text :> ReqBody '[JSON] Value :> Post '[JSON] Value
@@ -524,8 +530,11 @@ type FileReadAPI = "file" :> "content" :> QueryParam "directory" Text :> QueryPa
 -- /file/status
 type FileStatusAPI = "file" :> "status" :> QueryParam "directory" Text :> QueryParam "path" Text :> Get '[JSON] [Value]
 
--- /global/event
+-- /global/event - SSE stream for all global events
 type GlobalEventAPI = "global" :> "event" :> Raw
+
+-- /event - SSE stream with optional directory filter
+type EventAPI = "event" :> Raw
 
 -- PTY API (sandboxed terminals)
 
@@ -575,10 +584,13 @@ type ProviderOauthCallbackAPI =
 -- /project/:projectID
 type ProjectGetAPI = "project" :> Capture "projectID" Text :> Get '[JSON] Project
 
+-- /project/:projectID (Update)
+type ProjectUpdateAPI = "project" :> Capture "projectID" Text :> ReqBody '[JSON] Value :> Patch '[JSON] Project
+
 -- /find
 type FindAPI = "find" :> QueryParam "query" Text :> QueryParam "pattern" Text :> QueryParam "directory" Text :> Get '[JSON] [Value]
 
-type FindFileAPI = "find" :> "file" :> QueryParam "pattern" Text :> QueryParam "directory" Text :> Get '[JSON] [Value]
+type FindFileAPI = "find" :> "file" :> QueryParam "pattern" Text :> QueryParam "directory" Text :> QueryParam "dirs" Bool :> QueryParam "type" Text :> QueryParam "limit" Int :> Get '[JSON] [Value]
 
 type FindSymbolAPI = "find" :> "symbol" :> QueryParam "query" Text :> QueryParam "directory" Text :> Get '[JSON] [Value]
 
@@ -609,8 +621,11 @@ type TuiControlNextAPI = "tui" :> "control" :> "next" :> ReqBody '[JSON] Value :
 
 type TuiControlResponseAPI = "tui" :> "control" :> "response" :> ReqBody '[JSON] Value :> Post '[JSON] Value
 
--- /instance/dispose
+-- /instance/dispose (legacy - use /global/dispose)
 type InstanceDisposeAPI = "instance" :> "dispose" :> Post '[JSON] Value
+
+-- /global/dispose
+type GlobalDisposeAPI = "global" :> "dispose" :> Post '[JSON] Value
 
 -- /log
 type LogAPI = "log" :> ReqBody '[JSON] Value :> Post '[JSON] Value
@@ -624,8 +639,11 @@ type FormatterAPI = "formatter" :> QueryParam "directory" Text :> Get '[JSON] [F
 -- /experimental/tool/ids
 type ExperimentalToolIdsAPI = "experimental" :> "tool" :> "ids" :> Get '[JSON] [Text]
 
--- /experimental/tool
+-- /experimental/tool (POST)
 type ExperimentalToolAPI = "experimental" :> "tool" :> ReqBody '[JSON] Value :> Post '[JSON] Value
+
+-- /experimental/tool (GET - list tools)
+type ExperimentalToolListAPI = "experimental" :> "tool" :> QueryParam' '[Required] "provider" Text :> QueryParam' '[Required] "model" Text :> QueryParam "directory" Text :> Get '[JSON] [Value]
 
 -- /experimental/worktree
 type ExperimentalWorktreeGetAPI = "experimental" :> "worktree" :> Get '[JSON] Value
@@ -633,6 +651,8 @@ type ExperimentalWorktreeGetAPI = "experimental" :> "worktree" :> Get '[JSON] Va
 type ExperimentalWorktreePostAPI = "experimental" :> "worktree" :> ReqBody '[JSON] Value :> Post '[JSON] Value
 
 type ExperimentalWorktreeResetAPI = "experimental" :> "worktree" :> "reset" :> ReqBody '[JSON] Value :> Post '[JSON] Value
+
+type ExperimentalWorktreeDeleteAPI = "experimental" :> "worktree" :> ReqBody '[JSON] Value :> Delete '[JSON] Bool
 
 -- Chat input
 data ChatInput = ChatInput
@@ -652,8 +672,10 @@ type OpencodeAPI =
     HealthAPI
         :<|> PathAPI
         :<|> GlobalConfigAPI
+        :<|> GlobalConfigUpdateAPI
         :<|> ProjectListAPI
         :<|> ProjectGetAPI
+        :<|> ProjectUpdateAPI
         :<|> ProjectCurrentAPI
         :<|> ProviderListAPI
         :<|> ProviderAuthAPI
@@ -665,6 +687,7 @@ type OpencodeAPI =
         :<|> AuthDeleteAPI
         :<|> AgentAPI
         :<|> ConfigAPI
+        :<|> ConfigUpdateAPI
         :<|> CommandAPI
         :<|> SessionStatusAPI
         :<|> SessionListAPI
@@ -730,14 +753,18 @@ type OpencodeAPI =
         :<|> TuiControlNextAPI
         :<|> TuiControlResponseAPI
         :<|> InstanceDisposeAPI
+        :<|> GlobalDisposeAPI
+        :<|> EventAPI
         :<|> LogAPI
         :<|> SkillAPI
         :<|> FormatterAPI
         :<|> ExperimentalToolIdsAPI
+        :<|> ExperimentalToolListAPI
         :<|> ExperimentalToolAPI
         :<|> ExperimentalWorktreeGetAPI
         :<|> ExperimentalWorktreePostAPI
         :<|> ExperimentalWorktreeResetAPI
+        :<|> ExperimentalWorktreeDeleteAPI
         -- LLM
         :<|> ChatAPI
 

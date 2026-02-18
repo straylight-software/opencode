@@ -5,6 +5,7 @@ module Property.FindParseProps where
 import Data.Text (Text)
 import Data.Text qualified as T
 import Find.Parse qualified as Parse
+import Find.Search qualified as Search
 import Hedgehog
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
@@ -55,6 +56,25 @@ genPath = do
 genText :: Gen Text
 genText = Gen.text (Range.linear 0 50) Gen.alphaNum
 
+-- | Property: FindFileOptions has sensible defaults
+prop_findFileOptionsDefaults :: Property
+prop_findFileOptionsDefaults = property $ do
+    let opts = Search.FindFileOptions False Nothing Nothing
+    Search.ffoIncludeDirs opts === False
+    Search.ffoFileType opts === Nothing
+    Search.ffoLimit opts === Nothing
+
+-- | Property: FindFileOptions can be constructed with all options
+prop_findFileOptionsConstruction :: Property
+prop_findFileOptionsConstruction = property $ do
+    includeDirs <- forAll Gen.bool
+    fileType <- forAll $ Gen.maybe $ Gen.element ["file", "directory"]
+    limit <- forAll $ Gen.maybe $ Gen.int (Range.linear 1 200)
+    let opts = Search.FindFileOptions includeDirs fileType limit
+    Search.ffoIncludeDirs opts === includeDirs
+    Search.ffoFileType opts === fileType
+    Search.ffoLimit opts === limit
+
 tests :: TestTree
 tests =
     testGroup
@@ -64,4 +84,6 @@ tests =
         , testProperty "parse rg invalid" prop_parseRgLineInvalid
         , testProperty "parse fd empty" prop_parseFdLineEmpty
         , testProperty "parse rg empty text" prop_parseRgEmptyText
+        , testProperty "find options defaults" prop_findFileOptionsDefaults
+        , testProperty "find options construction" prop_findFileOptionsConstruction
         ]

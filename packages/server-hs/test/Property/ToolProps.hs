@@ -3,19 +3,24 @@
 -- | Tool execution property tests
 module Property.ToolProps where
 
+import Control.Monad (forM_)
 import Data.Aeson (Value (..), decode, encode, object, (.=))
 import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KM
+import Data.Foldable (toList)
+import Data.List (nub)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Hedgehog
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
-import System.Directory (doesFileExist, removeDirectoryRecursive)
+import System.Directory (canonicalizePath, doesFileExist, removeDirectoryRecursive)
 import System.FilePath ((</>))
 import System.IO.Temp (createTempDirectory)
 import Test.Tasty
 import Test.Tasty.Hedgehog
+import Tool.Defs qualified as Tool
 import Tool.Exec (execute)
 import Tool.Types
 
@@ -181,17 +186,28 @@ prop_bashTool = property $ do
 prop_bashToolUsesWorkdir :: Property
 prop_bashToolUsesWorkdir = property $ do
     (result, dir) <- evalIO $ withTempDir $ \tmpDir -> do
+        -- Canonicalize the path to resolve symlinks (e.g., /tmp -> /run/user/...)
+        canonicalDir <- canonicalizePath tmpDir
         let input =
                 object
-                    [ "command" .= ("pwd" :: Text)
+                    [ "command" .= ("pwd -P" :: Text) -- -P to get physical path
                     , "description" .= ("test workdir" :: Text)
                     , "timeout" .= (5000 :: Int)
-                    , "workdir" .= (T.pack tmpDir)
+                    , "workdir" .= (T.pack canonicalDir)
                     ]
-        output <- execute (testContext tmpDir) "bash" input
-        pure (output, tmpDir)
+        output <- execute (testContext canonicalDir) "bash" input
+        -- Also canonicalize what pwd returned for comparison
+        let pwdOutput = T.strip (toOutput output)
+        canonicalOutput <-
+            if T.null pwdOutput
+                then pure pwdOutput
+                else T.pack <$> canonicalizePath (T.unpack pwdOutput)
+        -- Also canonicalize the dir again to be sure
+        canonicalDir' <- canonicalizePath canonicalDir
+        pure (output{toOutput = canonicalOutput}, canonicalDir')
     assert $ not (toIsError result)
-    assert $ T.isInfixOf (T.pack dir) (toOutput result)
+    -- Use equality check on stripped paths for more reliable comparison
+    assert $ T.strip (toOutput result) == T.pack dir
 
 prop_toolOutputJsonRoundtrip :: Property
 prop_toolOutputJsonRoundtrip = property $ do
@@ -203,6 +219,94 @@ prop_toolOutputJsonRoundtrip = property $ do
     case decode (encode out) of
         Nothing -> failure
         Just out' -> out' === out
+
+-- | Property: tool definitions list is non-empty
+prop_toolDefinitionsNotEmpty :: Property
+prop_toolDefinitionsNotEmpty = property $ do
+    assert $ not (null Tool.toolDefinitions)
+
+-- | Property: all tools have valid names
+prop_allToolsHaveNames :: Property
+prop_allToolsHaveNames = property $ do
+    let tools = Tool.allTools
+    assert $ not (null tools)
+    -- Each tool should have a non-empty name
+    forM_ tools $ \tool -> do
+        assert $ not (T.null (tdName tool))
+
+-- | Property: tool definitions are valid JSON
+prop_toolDefinitionsValidJson :: Property
+prop_toolDefinitionsValidJson = property $ do
+    let defs = Tool.toolDefinitions
+    forM_ defs $ \def -> do
+        -- Encode and decode should work
+        let encoded = encode def
+        case decode encoded of
+            Nothing -> failure
+            Just (_ :: Value) -> success
+
+-- | Property: tool names are unique
+prop_toolNamesUnique :: Property
+prop_toolNamesUnique = property $ do
+    let tools = Tool.allTools
+    let names = map tdName tools
+    length names === length (nub names)
+
+-- | Property: tool list returns consistent results
+prop_toolListConsistent :: Property
+prop_toolListConsistent = property $ do
+    let list1 = Tool.allTools
+    let list2 = Tool.allTools
+    list1 === list2
+
+-- | Property: tool definitions contain read tool
+prop_toolListContainsRead :: Property
+prop_toolListContainsRead = property $ do
+    let tools = Tool.allTools
+    assert $ any (\t -> tdName t == "read") tools
+
+-- | Property: tool definitions contain write tool
+prop_toolListContainsWrite :: Property
+prop_toolListContainsWrite = property $ do
+    let tools = Tool.allTools
+    assert $ any (\t -> tdName t == "write") tools
+
+-- | Property: tool definitions contain bash tool
+prop_toolListContainsBash :: Property
+prop_toolListContainsBash = property $ do
+    let tools = Tool.allTools
+    assert $ any (\t -> tdName t == "bash") tools
+
+-- | Property: tool schemas have type field
+prop_toolSchemasHaveType :: Property
+prop_toolSchemasHaveType = property $ do
+    let tools = Tool.allTools
+    forM_ tools $ \tool -> do
+        let schema = tdInputSchema tool
+        case decode (encode schema) of
+            Nothing -> failure
+            Just (Object obj) -> do
+                case KM.lookup "type" obj of
+                    Just (String "object") -> success
+                    _ -> failure
+            _ -> failure
+
+-- | Property: tool required params are subset of all params
+prop_toolRequiredParamsValid :: Property
+prop_toolRequiredParamsValid = property $ do
+    let tools = Tool.allTools
+    forM_ tools $ \tool -> do
+        let schema = tdInputSchema tool
+        case decode (encode schema) of
+            Nothing -> success -- Skip if no schema
+            Just (Object obj) -> do
+                case (KM.lookup "required" obj, KM.lookup "properties" obj) of
+                    (Just (Array req), Just (Object props)) -> do
+                        let reqList = [r | String r <- toList req]
+                        let propKeys = map Key.toText (KM.keys props)
+                        assert $ all (`elem` propKeys) reqList
+                    _ -> success
+            _ -> success
 
 -- Generators
 genText :: Gen Text
@@ -234,4 +338,14 @@ tests =
         , testProperty "bash tool" prop_bashTool
         , testProperty "bash tool uses workdir" prop_bashToolUsesWorkdir
         , testProperty "tool output JSON roundtrip" prop_toolOutputJsonRoundtrip
+        , testProperty "tool definitions not empty" prop_toolDefinitionsNotEmpty
+        , testProperty "all tools have names" prop_allToolsHaveNames
+        , testProperty "tool definitions valid JSON" prop_toolDefinitionsValidJson
+        , testProperty "tool names unique" prop_toolNamesUnique
+        , testProperty "tool list consistent" prop_toolListConsistent
+        , testProperty "tool list contains read" prop_toolListContainsRead
+        , testProperty "tool list contains write" prop_toolListContainsWrite
+        , testProperty "tool list contains bash" prop_toolListContainsBash
+        , testProperty "tool schemas have type" prop_toolSchemasHaveType
+        , testProperty "tool required params valid" prop_toolRequiredParamsValid
         ]

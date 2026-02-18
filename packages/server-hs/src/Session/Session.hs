@@ -138,19 +138,29 @@ delete ctx sid = do
             pure True
 
 -- | List all sessions for the current project
-list :: SessionContext -> Maybe Bool -> Maybe Int -> IO [Session]
-list ctx mRoots mLimit = do
+list :: SessionContext -> Maybe Bool -> Maybe Int -> Maybe Int -> Maybe Text -> IO [Session]
+list ctx mRoots mLimit mStart mSearch = do
     keys <- Storage.list (scStorage ctx) ["session", scProjectID ctx]
     sessions <- forM keys $ \key -> do
         let sid = last key
         get ctx sid
     let valid = [s | Just s <- sessions]
-    let filtered = case mRoots of
+    -- Filter by roots (no parent)
+    let rootFiltered = case mRoots of
             Just True -> filter (isNothing . sessionParentID) valid
             _ -> valid
+    -- Filter by start timestamp (sessions updated on or after)
+    let startFiltered = case mStart of
+            Just ts -> filter (\s -> stUpdated (sessionTime s) >= fromIntegral ts) rootFiltered
+            Nothing -> rootFiltered
+    -- Filter by search (case-insensitive title match)
+    let searchFiltered = case mSearch of
+            Just q -> filter (\s -> T.toLower q `T.isInfixOf` T.toLower (sessionTitle s)) startFiltered
+            Nothing -> startFiltered
+    -- Apply limit
     let limited = case mLimit of
-            Just n -> take n filtered
-            Nothing -> filtered
+            Just n -> take n searchFiltered
+            Nothing -> searchFiltered
     pure limited
 
 -- | Touch a session (update timestamp)

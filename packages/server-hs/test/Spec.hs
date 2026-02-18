@@ -4,6 +4,7 @@ module Main where
 import Property.BusProps qualified as BusProps
 import Property.ConfigProps qualified as ConfigProps
 import Property.DiffProps qualified as DiffProps
+import Property.EventProps qualified as EventProps
 import Property.ExperimentalProps qualified as ExperimentalProps
 import Property.FindParseProps qualified as FindParseProps
 import Property.FormatterProps qualified as FormatterProps
@@ -29,12 +30,18 @@ import Property.TodoProps qualified as TodoProps
 import Property.ToolProps qualified as ToolProps
 import Property.TuiProps qualified as TuiProps
 import Property.VcsStatusProps qualified as VcsStatusProps
+import System.Posix.Signals (Handler (Ignore), installHandler, sigHUP, sigTERM)
 import Test.Tasty
 import Test.Tasty.Hspec
 import Unit.ApiSpec qualified as ApiSpec
 
 main :: IO ()
 main = do
+    -- Install signal handlers at startup to prevent SIGTERM/SIGHUP from
+    -- subprocess tests affecting the test runner. PTY processes can send
+    -- these signals when they terminate.
+    _ <- installHandler sigTERM Ignore Nothing
+    _ <- installHandler sigHUP Ignore Nothing
     apiTests <- testSpec "API Unit Tests" ApiSpec.spec
     defaultMain $
         testGroup
@@ -45,6 +52,7 @@ main = do
                 , BusProps.tests
                 , ConfigProps.tests
                 , DiffProps.tests
+                , EventProps.tests
                 , FormatterProps.tests
                 , FindParseProps.tests
                 , ExperimentalProps.tests

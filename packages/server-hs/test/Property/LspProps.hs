@@ -9,7 +9,7 @@ import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
 import Lsp.Store qualified as LspStore
 import Storage.Storage qualified as Storage
-import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
+import System.Directory (canonicalizePath, createDirectoryIfMissing, removeDirectoryRecursive)
 import System.FilePath (takeDirectory, (</>))
 import System.IO.Temp (createTempDirectory)
 import Test.Tasty
@@ -35,7 +35,8 @@ prop_getDiagnosticsFileFallback :: Property
 prop_getDiagnosticsFileFallback = property $ do
     values <- forAll $ Gen.list (Range.linear 1 5) genValue
     result <- evalIO $ withStore $ \store -> do
-        let base = takeDirectory (Storage.storageDir store)
+        -- Canonicalize to resolve symlinks (important in nix sandbox)
+        base <- canonicalizePath (takeDirectory (Storage.storageDir store))
         let path = base </> "lsp" </> "diagnostics.json"
         createDirectoryIfMissing True (base </> "lsp")
         Aeson.encodeFile path values
@@ -51,6 +52,6 @@ tests :: TestTree
 tests =
     testGroup
         "LSP Property Tests"
-        [ testProperty "set/get diagnostics" prop_setGetDiagnostics
-        , testProperty "file fallback" prop_getDiagnosticsFileFallback
+        [ testProperty "set/get diagnostics" (withTests 1000 prop_setGetDiagnostics)
+        , testProperty "file fallback" (withTests 1000 prop_getDiagnosticsFileFallback)
         ]

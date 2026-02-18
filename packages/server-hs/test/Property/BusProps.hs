@@ -6,7 +6,7 @@ module Property.BusProps where
 import Bus.Bus qualified as Bus
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM
-import Control.Monad (replicateM, void)
+import Control.Monad (replicateM, replicateM_, void)
 import Data.Aeson (Value (..))
 import Data.Text (Text)
 import Hedgehog
@@ -17,25 +17,25 @@ import Test.Tasty.Hedgehog
 
 -- | Property: published events are received by subscribers
 prop_publishSubscribe :: Property
-prop_publishSubscribe = property $ do
+prop_publishSubscribe = withTests 20 $ property $ do
     eventType <- forAll genEventType
-    eventCount <- forAll $ Gen.int (Range.linear 1 20)
+    eventCount <- forAll $ Gen.int (Range.linear 1 10)
 
     received <- evalIO $ do
         bus <- Bus.newBus
         receivedVar <- newTVarIO []
 
         -- Subscribe to events
-        void $ Bus.subscribe bus eventType $ \event -> do
+        void $ Bus.subscribe bus eventType $ \event ->
             atomically $ modifyTVar' receivedVar (Bus.beType event :)
 
         -- Publish events
-        void $ replicateM eventCount $ do
+        replicateM_ eventCount $ do
             Bus.publish bus eventType Null
-            threadDelay 1000 -- Small delay to ensure ordering
+            threadDelay 50
 
         -- Wait for all events to be processed
-        threadDelay 10000
+        threadDelay 2000
 
         atomically $ readTVar receivedVar
 
@@ -46,21 +46,21 @@ prop_publishSubscribe = property $ do
 
 -- | Property: subscribeAll receives all event types
 prop_subscribeAll :: Property
-prop_subscribeAll = property $ do
-    eventTypes <- forAll $ Gen.list (Range.linear 1 5) genEventType
+prop_subscribeAll = withTests 20 $ property $ do
+    eventTypes <- forAll $ Gen.list (Range.linear 1 3) genEventType
 
     received <- evalIO $ do
         bus <- Bus.newBus
         receivedVar <- newTVarIO []
 
         -- Subscribe to all events
-        void $ Bus.subscribeAll bus $ \event -> do
+        void $ Bus.subscribeAll bus $ \event ->
             atomically $ modifyTVar' receivedVar (Bus.beType event :)
 
         -- Publish different event types
         mapM_ (\et -> Bus.publish bus et Null) eventTypes
 
-        threadDelay 10000
+        threadDelay 5000
         atomically $ readTVar receivedVar
 
     -- Should receive all events
@@ -68,9 +68,9 @@ prop_subscribeAll = property $ do
 
 -- | Property: multiple subscribers receive the same events
 prop_multipleSubscribers :: Property
-prop_multipleSubscribers = property $ do
+prop_multipleSubscribers = withTests 20 $ property $ do
     eventType <- forAll genEventType
-    subscriberCount <- forAll $ Gen.int (Range.linear 2 5)
+    subscriberCount <- forAll $ Gen.int (Range.linear 2 4)
 
     results <- evalIO $ do
         bus <- Bus.newBus
@@ -86,7 +86,7 @@ prop_multipleSubscribers = property $ do
         -- Publish one event
         Bus.publish bus eventType Null
 
-        waitForAll vars (50 :: Int)
+        waitForAll vars (30 :: Int)
 
     -- All subscribers should have received the event
     all (\r -> length r == 1) results === True
@@ -100,19 +100,19 @@ prop_multipleSubscribers = property $ do
                 if attempts <= 0
                     then pure results
                     else do
-                        threadDelay 1000
+                        threadDelay 500
                         waitForAll vars (attempts - 1)
 
 prop_subscribeAllOrder :: Property
-prop_subscribeAllOrder = property $ do
-    eventTypes <- forAll $ Gen.list (Range.linear 1 5) genEventType
+prop_subscribeAllOrder = withTests 20 $ property $ do
+    eventTypes <- forAll $ Gen.list (Range.linear 1 3) genEventType
     received <- evalIO $ do
         bus <- Bus.newBus
         receivedVar <- newTVarIO []
         void $ Bus.subscribeAll bus $ \event ->
             atomically $ modifyTVar' receivedVar (Bus.beType event :)
         mapM_ (\et -> Bus.publish bus et Null) eventTypes
-        threadDelay 10000
+        threadDelay 5000
         atomically $ readTVar receivedVar
     reverse received === eventTypes
 

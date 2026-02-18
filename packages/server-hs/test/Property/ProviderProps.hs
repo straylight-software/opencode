@@ -4,6 +4,7 @@
 module Property.ProviderProps where
 
 import Data.Aeson (decode, encode)
+import Data.ByteString.Lazy qualified as BL
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Hedgehog
@@ -12,7 +13,8 @@ import Hedgehog.Range qualified as Range
 import Provider.Provider qualified as Provider
 import Provider.Types
 import Storage.Storage qualified as Storage
-import System.Directory (removeDirectoryRecursive)
+import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
+import System.FilePath ((</>))
 import System.IO.Temp (createTempDirectory)
 import Test.Tasty
 import Test.Tasty.Hedgehog
@@ -68,6 +70,26 @@ prop_authPersistence = property $ do
     let (before, afterAuth) = result
     assert $ any (\a -> paProviderID a == "openai" && paAuthenticated a) before
     assert $ any (\a -> paProviderID a == "openai" && not (paAuthenticated a)) afterAuth
+
+-- | Property: authStatus handles corrupt/invalid JSON files gracefully
+prop_authStatusCorruptJson :: Property
+prop_authStatusCorruptJson = property $ do
+    result <- evalIO $ do
+        tmpDir <- createTempDirectory "/tmp" "provider-corrupt"
+        Storage.withStorage tmpDir $ \storage -> do
+            -- Write invalid JSON to the auth file for openai
+            let authDir = tmpDir </> "auth"
+            createDirectoryIfMissing True authDir
+            BL.writeFile (authDir </> "openai.json") "{ invalid json }"
+            -- authStatus should not throw, should return unauthenticated
+            auths <- Provider.authStatus storage
+            removeDirectoryRecursive tmpDir
+            pure auths
+    -- Should return results without throwing
+    assert $ not (null result)
+    -- OpenAI should be marked as not authenticated due to corrupt file
+    let openaiAuth = filter (\a -> paProviderID a == "openai") result
+    assert $ all (not . paAuthenticated) openaiAuth
 
 -- Generators
 genText :: Gen Text
@@ -127,4 +149,5 @@ tests =
         , testProperty "AuthMethod round-trip" prop_authMethodRoundtrip
         , testProperty "ProviderAuth round-trip" prop_providerAuthRoundtrip
         , testProperty "Auth persistence" prop_authPersistence
+        , testProperty "Auth status handles corrupt JSON" prop_authStatusCorruptJson
         ]

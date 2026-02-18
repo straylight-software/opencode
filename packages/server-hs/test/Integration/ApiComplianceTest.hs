@@ -116,7 +116,7 @@ prop_generateValidRequests = property $ do
             rest = map (T.takeWhile (/= '}')) (drop 1 parts)
          in filter (not . T.null) rest
     buildUrl base pathParams _ =
-        foldl (\acc p -> T.replace ("{" <> p <> "}") p acc) base pathParams
+        foldl' (\acc p -> T.replace ("{" <> p <> "}") p acc) base pathParams
 
 -- | Property: Test endpoint against running server (if available)
 prop_testEndpoint :: ServerConfig -> Property

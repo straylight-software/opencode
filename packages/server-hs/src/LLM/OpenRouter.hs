@@ -236,15 +236,15 @@ chatStream client req onDelta = do
                 if eof
                     then pure ()
                     else do
-                        line <- hGetLine hOut
-                        -- Parse SSE line
-                        when (": OPENROUTER" `C8.isPrefixOf` C8.pack line) $ pure () -- Skip processing comments
-                        when ("data: " `C8.isPrefixOf` C8.pack line) $ do
-                            let jsonPart = C8.drop 6 (C8.pack line)
+                        line <- T.pack <$> hGetLine hOut
+                        -- Parse SSE line (skip OPENROUTER comments)
+                        when (": OPENROUTER" `T.isPrefixOf` line) $ pure ()
+                        when ("data: " `T.isPrefixOf` line) $ do
+                            let jsonPart = encodeUtf8 $ T.drop 6 line
                             case extractDelta jsonPart of
                                 Just delta -> onDelta delta
                                 Nothing -> pure ()
-                        if "data: [DONE]" `C8.isPrefixOf` C8.pack line
+                        if "data: [DONE]" `T.isPrefixOf` line
                             then pure ()
                             else readLoop
 

@@ -12,23 +12,23 @@ import Test.Tasty
 import Test.Tasty.Hedgehog
 
 prop_uniqueNames :: Property
-prop_uniqueNames = property $ do
+prop_uniqueNames = withTests 10 $ property $ do
     statuses <- evalIO $ statusFor "."
     let names = map fsName statuses
     length names === length (nub names)
 
 prop_extensionsNonEmpty :: Property
-prop_extensionsNonEmpty = property $ do
+prop_extensionsNonEmpty = withTests 10 $ property $ do
     statuses <- evalIO $ statusFor "."
     assert $ all (not . null) (map fsExtensions statuses)
 
 prop_formatterDisabled :: Property
-prop_formatterDisabled = property $ do
+prop_formatterDisabled = withTests 10 $ property $ do
     statuses <- evalIO $ statusForConfig "." (Config.defaultConfig{CT.cfgFormatter = Just CT.FormatterDisabled})
     statuses === []
 
 prop_customFormatterIncluded :: Property
-prop_customFormatterIncluded = property $ do
+prop_customFormatterIncluded = withTests 10 $ property $ do
     let entry =
             CT.FormatterEntry
                 { CT.feDisabled = Nothing
@@ -44,7 +44,7 @@ prop_customFormatterIncluded = property $ do
     assert $ any (\status -> fsName status == "custom" && fsEnabled status) statuses
 
 prop_disableBaseFormatter :: Property
-prop_disableBaseFormatter = property $ do
+prop_disableBaseFormatter = withTests 10 $ property $ do
     let entry =
             CT.FormatterEntry
                 { CT.feDisabled = Just True
@@ -60,7 +60,7 @@ prop_disableBaseFormatter = property $ do
     assert $ all (\status -> fsName status /= "gofmt") statuses
 
 prop_overrideExtensions :: Property
-prop_overrideExtensions = property $ do
+prop_overrideExtensions = withTests 10 $ property $ do
     let entry =
             CT.FormatterEntry
                 { CT.feDisabled = Nothing

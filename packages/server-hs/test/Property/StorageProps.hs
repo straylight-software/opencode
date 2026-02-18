@@ -18,7 +18,7 @@ import Test.Tasty.Hedgehog
 
 -- | Property: write then read returns the same value
 prop_writeReadIdentity :: Property
-prop_writeReadIdentity = property $ do
+prop_writeReadIdentity = withTests 50 $ property $ do
     keyParts <- forAll $ Gen.list (Range.linear 1 5) genKeyPart
     val <- forAll genTestValue
 
@@ -33,7 +33,7 @@ prop_writeReadIdentity = property $ do
 
 -- | Property: update modifies the value correctly
 prop_updateModifies :: Property
-prop_updateModifies = property $ do
+prop_updateModifies = withTests 50 $ property $ do
     keyParts <- forAll $ Gen.list (Range.linear 1 3) genKeyPart
     initial <- forAll genTestValue
     newContent <- forAll genTestValue
@@ -49,7 +49,7 @@ prop_updateModifies = property $ do
 
 -- | Property: list returns keys with the given prefix
 prop_listWithPrefix :: Property
-prop_listWithPrefix = property $ do
+prop_listWithPrefix = withTests 50 $ property $ do
     prefix <- forAll $ Gen.text (Range.linear 1 10) Gen.alphaNum
     count <- forAll $ Gen.int (Range.linear 1 10)
 
@@ -69,7 +69,7 @@ prop_listWithPrefix = property $ do
 
 -- | Property: remove deletes the value
 prop_removeDeletes :: Property
-prop_removeDeletes = property $ do
+prop_removeDeletes = withTests 50 $ property $ do
     keyParts <- forAll $ Gen.list (Range.linear 1 3) genKeyPart
     val <- forAll genTestValue
 
@@ -93,7 +93,7 @@ prop_removeDeletes = property $ do
     genTestValue = Gen.text (Range.linear 0 100) Gen.alphaNum
 
 prop_removeListEmpty :: Property
-prop_removeListEmpty = property $ do
+prop_removeListEmpty = withTests 50 $ property $ do
     prefix <- forAll $ Gen.text (Range.linear 1 10) Gen.alphaNum
     val <- forAll genTestValue
     keys <- evalIO $ withTempStorage $ \storage -> do
@@ -105,7 +105,7 @@ prop_removeListEmpty = property $ do
     genTestValue = Gen.text (Range.linear 0 100) Gen.alphaNum
 
 prop_listRespectsPrefix :: Property
-prop_listRespectsPrefix = property $ do
+prop_listRespectsPrefix = withTests 50 $ property $ do
     prefix <- forAll $ Gen.text (Range.linear 1 10) Gen.alphaNum
     key1 <- forAll $ Gen.text (Range.linear 1 10) Gen.alphaNum
     key2 <- forAll $ Gen.text (Range.linear 1 10) Gen.alphaNum

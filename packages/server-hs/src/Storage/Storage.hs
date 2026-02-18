@@ -16,12 +16,15 @@ module Storage.Storage (
 
 import Control.Exception (Exception, catch, throwIO)
 import Control.Monad (forM, when)
-import Data.Aeson (FromJSON, ToJSON, eitherDecodeFileStrict, encodeFile)
+import Data.Aeson (FromJSON, ToJSON, eitherDecodeFileStrict, encode)
+import Data.ByteString.Lazy qualified as BL
 import Data.Text (Text)
 import Data.Text qualified as T
 import System.Directory
 import System.FilePath (dropExtension, splitDirectories, takeDirectory, (</>))
+import System.IO (hClose, hFlush)
 import System.IO.Error (isDoesNotExistError)
+import System.Posix.Temp (mkstemp)
 import Prelude hiding (read)
 
 -- | Storage configuration
@@ -60,12 +63,21 @@ read cfg key = do
         | isDoesNotExistError e = throwIO (NotFoundError target)
         | otherwise = throwIO e
 
--- | Write a JSON value to storage
+-- | Write a JSON value to storage using atomic write (temp file + rename)
 write :: (ToJSON a) => StorageConfig -> [Text] -> a -> IO ()
 write cfg key content = do
     let target = keyPath cfg key
-    createDirectoryIfMissing True (takeDirectory target)
-    encodeFile target content
+        dir = takeDirectory target
+        encoded = encode content
+    createDirectoryIfMissing True dir
+    -- Atomic write: create temp file, write, flush, close, then rename
+    (tmpPath, h) <- mkstemp (dir </> ".tmp.XXXXXX")
+    BL.hPut h encoded
+    hFlush h
+    hClose h
+    -- Rename is atomic on POSIX - the target file will either have
+    -- the old content or the new content, never partial
+    renamePath tmpPath target
 
 -- | Update a JSON value in storage
 update :: (FromJSON a, ToJSON a) => StorageConfig -> [Text] -> (a -> a) -> IO a

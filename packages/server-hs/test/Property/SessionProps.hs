@@ -103,7 +103,7 @@ prop_listReturnsCreated = property $ do
                         }
             Session.create ctx input
         -- List all sessions
-        Session.list ctx Nothing Nothing
+        Session.list ctx Nothing Nothing Nothing Nothing
 
     -- Should find all created sessions
     length sessions === count
@@ -118,7 +118,7 @@ prop_listContainsCreatedId = property $ do
                     { ST.csiTitle = Just "test"
                     , ST.csiParentID = Nothing
                     }
-        allSessions <- Session.list ctx Nothing Nothing
+        allSessions <- Session.list ctx Nothing Nothing Nothing Nothing
         pure (session, allSessions)
     assert $ any (\s -> ST.sessionId s == ST.sessionId created) sessions
 
@@ -157,6 +157,35 @@ prop_updateSummaryShareRevert = property $ do
     share === Just (ST.SessionShare url)
     revert === Just (ST.SessionRevert msgId Nothing Nothing Nothing)
 
+-- | Property: list with search filters by title (case-insensitive)
+prop_listSearchFilter :: Property
+prop_listSearchFilter = property $ do
+    (matching, nonMatching) <- evalIO $ withTestContext $ \ctx -> do
+        -- Create sessions with different titles
+        _ <- Session.create ctx ST.CreateSessionInput{ST.csiTitle = Just "Alpha Project", ST.csiParentID = Nothing}
+        _ <- Session.create ctx ST.CreateSessionInput{ST.csiTitle = Just "Beta Project", ST.csiParentID = Nothing}
+        _ <- Session.create ctx ST.CreateSessionInput{ST.csiTitle = Just "Gamma Task", ST.csiParentID = Nothing}
+        -- Search for "project" (case-insensitive)
+        matching <- Session.list ctx Nothing Nothing Nothing (Just "project")
+        nonMatching <- Session.list ctx Nothing Nothing Nothing (Just "delta")
+        pure (matching, nonMatching)
+    -- Should find 2 sessions matching "project"
+    length matching === 2
+    -- Should find 0 sessions matching "delta"
+    length nonMatching === 0
+
+-- | Property: list with limit restricts results
+prop_listLimitFilter :: Property
+prop_listLimitFilter = property $ do
+    limitVal <- forAll $ Gen.int (Range.linear 1 3)
+    sessions <- evalIO $ withTestContext $ \ctx -> do
+        -- Create 5 sessions
+        void $ replicateM 5 $ Session.create ctx ST.CreateSessionInput{ST.csiTitle = Just "test", ST.csiParentID = Nothing}
+        -- List with limit
+        Session.list ctx Nothing (Just limitVal) Nothing Nothing
+    -- Should return at most limitVal sessions
+    assert $ length sessions <= limitVal
+
 -- Generators
 -- Test tree
 tests :: TestTree
@@ -169,4 +198,6 @@ tests =
         , testProperty "list returns created" prop_listReturnsCreated
         , testProperty "list contains created id" prop_listContainsCreatedId
         , testProperty "update summary/share/revert" prop_updateSummaryShareRevert
+        , testProperty "list search filter" prop_listSearchFilter
+        , testProperty "list limit filter" prop_listLimitFilter
         ]
