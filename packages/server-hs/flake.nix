@@ -2,22 +2,58 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    haskell-flake.url = "github:srid/haskell-flake";
-    treefmt-nix.url = "github:numtide/treefmt-nix";
-    haskemathesis = {
-      url = "github:weyl-ai/haskemathesis";
-      flake = false;
-    };
   };
 
   outputs =
-    inputs@{ flake-parts, ... }:
-    flake-parts.lib.mkFlake { inherit inputs; } (
-      { lib, ... }:
-      {
-        systems = lib.systems.flakeExposed;
+    inputs@{ flake-parts, nixpkgs, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
 
-        imports = lib.filesystem.listFilesRecursive ./nix;
-      }
-    );
+      perSystem =
+        { pkgs, system, ... }:
+        let
+          hsPkgs = pkgs.haskellPackages.override {
+            overrides = self: super: {
+              haskemathesis = self.callPackage ./haskemathesis.nix { };
+              opencode-server = self.callPackage ./default.nix { };
+            };
+          };
+
+          runtimePkgs = with pkgs; [
+            ripgrep
+            git
+            fd
+          ];
+
+          server = pkgs.writeShellApplication {
+            name = "opencode-server";
+            runtimeInputs = runtimePkgs;
+            text = ''
+              exec ${hsPkgs.opencode-server}/bin/opencode-server "$@"
+            '';
+          };
+        in
+        {
+          packages = {
+            default = server;
+            opencode-server = hsPkgs.opencode-server;
+          };
+
+          devShells.default = hsPkgs.shellFor {
+            packages = p: [ p.opencode-server ];
+            buildInputs =
+              runtimePkgs
+              ++ (with pkgs; [
+                cabal-install
+                ghcid
+                haskell-language-server
+              ]);
+          };
+        };
+    };
 }

@@ -11,7 +11,7 @@ import Data.Aeson (object)
 import Data.ByteString qualified as BS
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Global.Event (globalEventHandler)
+import Global.Event ()
 import Handlers
 import Katip qualified
 import Log qualified
@@ -20,7 +20,7 @@ import Network.Wai (Middleware, mapResponseHeaders, requestMethod, responseLBS)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Handler.WebSockets (websocketsOr)
 import Network.WebSockets (PendingConnection, acceptRequest, defaultConnectionOptions, pendingRequest, receiveData, requestPath, sendBinaryData)
-import Pty.Connect (ptyConnectHandler)
+import Pty.Connect ()
 import Pty.Pty qualified as Pty
 import Servant
 import State
