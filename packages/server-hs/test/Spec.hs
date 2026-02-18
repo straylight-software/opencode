@@ -1,6 +1,7 @@
 -- | Main test runner for opencode-server
 module Main where
 
+import Integration.HaskemathesisTest qualified as HaskemathesisTest
 import Property.BusProps qualified as BusProps
 import Property.ConfigProps qualified as ConfigProps
 import Property.DiffProps qualified as DiffProps
@@ -79,4 +80,5 @@ main = do
                 , TuiProps.tests
                 ]
             , apiTests
+            , HaskemathesisTest.tests
             ]

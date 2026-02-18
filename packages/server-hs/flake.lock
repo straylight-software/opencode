@@ -33,6 +33,22 @@
         "type": "github"
       }
     },
+    "haskemathesis": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1771443086,
+        "narHash": "sha256-YTGOdGo0/886/cxLKUyQ8ZHBjpBXuUP4t3pwZMSOKKg=",
+        "owner": "weyl-ai",
+        "repo": "haskemathesis",
+        "rev": "a573809b500f0bd210110118a67bcadc0c60c34b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "weyl-ai",
+        "repo": "haskemathesis",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1771177547,
@@ -84,6 +100,7 @@
       "inputs": {
         "flake-parts": "flake-parts",
         "haskell-flake": "haskell-flake",
+        "haskemathesis": "haskemathesis",
         "nixpkgs": "nixpkgs",
         "treefmt-nix": "treefmt-nix"
       }

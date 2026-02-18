@@ -21,6 +21,9 @@
     in
     {
       haskellProjects.default = {
+        packages = {
+          haskemathesis.source = inputs.haskemathesis;
+        };
         settings = {
           opencode-server = {
             stan = true;

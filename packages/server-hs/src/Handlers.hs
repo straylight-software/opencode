@@ -51,6 +51,7 @@ import Provider.Provider qualified as Provider
 import Provider.Types qualified as PT
 import Proxy.Proxy qualified as Proxy
 import Pty.Parse qualified as PtyParse
+import Pty.Connect qualified as PtyConnect
 import Pty.Pty qualified as Pty
 import Pty.Types qualified as PtyT
 import Request.Store qualified as RequestStore
@@ -1311,3 +1312,105 @@ dropPrefix prefix value =
     case prefix `T.isPrefixOf` value of
         True -> T.drop (T.length prefix) value
         False -> value
+
+-- | Server Wiring - combines all handlers into a Servant Server
+server :: AppState -> Server OpencodeAPI
+server st =
+    healthHandler st
+        :<|> pathHandler st
+        :<|> globalConfigHandler
+        :<|> globalConfigUpdateHandler
+        :<|> projectListHandler st
+        :<|> projectGetHandler st
+        :<|> projectUpdateHandler st
+        :<|> projectCurrentHandler st
+        :<|> providerListHandler st
+        :<|> providerAuthHandler st
+        :<|> providerHandler
+        :<|> providerOauthAuthorizeHandler st
+        :<|> providerOauthCallbackHandler st
+        :<|> authCreateHandler st
+        :<|> authUpdateHandler st
+        :<|> authDeleteHandler st
+        :<|> agentHandler
+        :<|> configHandler st
+        :<|> configUpdateHandler st
+        :<|> commandHandler
+        :<|> sessionStatusHandler st
+        :<|> sessionListHandler st
+        :<|> sessionCreateHandler st
+        :<|> sessionGetHandler st
+        :<|> sessionDeleteHandler st
+        :<|> sessionUpdateHandler st
+        :<|> sessionChildrenHandler st
+        :<|> sessionTodoHandler st
+        :<|> sessionInitHandler st
+        :<|> sessionForkHandler st
+        :<|> sessionAbortHandler st
+        :<|> sessionShareCreateHandler st
+        :<|> sessionShareDeleteHandler st
+        :<|> sessionDiffHandler st
+        :<|> sessionSummarizeHandler st
+        :<|> sessionCommandHandler st
+        :<|> sessionShellHandler st
+        :<|> sessionRevertHandler st
+        :<|> sessionUnrevertHandler st
+        :<|> sessionPermissionHandler st
+        :<|> sessionMessageListHandler st
+        :<|> sessionMessageCreateHandler st
+        :<|> sessionMessageGetHandler st
+        :<|> sessionMessagePartDeleteHandler st
+        :<|> sessionMessagePartUpdateHandler st
+        :<|> sessionPromptAsyncHandler st
+        :<|> lspHandler st
+        :<|> vcsHandler st
+        :<|> permissionHandler st
+        :<|> permissionReplyHandler st
+        :<|> questionHandler st
+        :<|> questionReplyHandler st
+        :<|> questionRejectHandler st
+        :<|> findHandler st
+        :<|> findFileHandler st
+        :<|> findSymbolHandler st
+        :<|> fileListHandler
+        :<|> fileReadHandler
+        :<|> fileStatusHandler st
+        :<|> Event.globalEventHandler st
+        -- PTY handlers
+        :<|> ptyListHandler st
+        :<|> ptyCreateHandler st
+        :<|> ptyGetHandler st
+        :<|> ptyUpdateHandler st
+        :<|> ptyDeleteHandler st
+        :<|> PtyConnect.ptyConnectHandler st
+        :<|> ptyCommitHandler st
+        :<|> ptyChangesHandler st
+        -- TUI handlers
+        :<|> tuiAppendPromptHandler st
+        :<|> tuiOpenHandler st "open-help"
+        :<|> tuiOpenHandler st "open-sessions"
+        :<|> tuiOpenHandler st "open-themes"
+        :<|> tuiOpenHandler st "open-models"
+        :<|> tuiSubmitPromptHandler st
+        :<|> tuiClearPromptHandler st
+        :<|> tuiExecuteCommandHandler st
+        :<|> tuiShowToastHandler st
+        :<|> tuiPublishHandler st
+        :<|> tuiSelectSessionHandler st
+        :<|> tuiControlHandler st "next"
+        :<|> tuiControlHandler st "response"
+        :<|> instanceDisposeHandler st
+        :<|> globalDisposeHandler st
+        :<|> eventHandler st
+        :<|> logHandler st
+        :<|> skillHandler st
+        :<|> formatterHandler st
+        :<|> experimentalToolIdsHandler
+        :<|> experimentalToolListHandler st
+        :<|> experimentalToolHandler st
+        :<|> experimentalWorktreeGetHandler st
+        :<|> experimentalWorktreePostHandler st
+        :<|> experimentalWorktreeResetHandler st
+        :<|> experimentalWorktreeDeleteHandler st
+        -- LLM
+        :<|> chatHandler st

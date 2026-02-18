@@ -4,6 +4,10 @@
     flake-parts.url = "github:hercules-ci/flake-parts";
     haskell-flake.url = "github:srid/haskell-flake";
     treefmt-nix.url = "github:numtide/treefmt-nix";
+    haskemathesis = {
+      url = "github:weyl-ai/haskemathesis";
+      flake = false;
+    };
   };
 
   outputs =
